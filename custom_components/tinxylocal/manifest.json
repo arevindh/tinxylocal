@@ -11,5 +11,6 @@
   "iot_class": "local_polling",
   "requirements": ["pyarmor=9.0.3"],
   "ssdp": [],
-  "zeroconf": []
+  "zeroconf": [],
+  "version": "0.0.6"
 }
