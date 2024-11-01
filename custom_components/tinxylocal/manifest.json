@@ -1,0 +1,15 @@
+{
+  "domain": "tinxylocal",
+  "name": "Tinxy Local",
+  "codeowners": [
+    "@arevindh"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://www.home-assistant.io/integrations/tinxylocal",
+  "homekit": {},
+  "iot_class": "local_polling",
+  "requirements": ["pyarmor=9.0.3"],
+  "ssdp": [],
+  "zeroconf": []
+}

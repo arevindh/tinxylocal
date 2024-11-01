@@ -1,0 +1,5 @@
+{
+    "name": "Tinxy Local Smart Devices",
+    "render_readme": true,
+    "domains": ["switch","light"]
+}
