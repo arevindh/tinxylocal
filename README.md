@@ -1,3 +1,4 @@
+
 # Tinxy Local Home Assistant Integration (Beta) Installation Guide
 
 This guide will help you set up the **tinxy-local** integration for Home Assistant. Since this integration is in beta, please carefully follow each step and be prepared for potential troubleshooting.
@@ -30,6 +31,22 @@ For each device you want to add:
    - Click **Add Integration** and search for **tinxy-local**.
    - When prompted, enter the API key to link the device with the integration.
 
+### Prompt Details for Tinxy Local Integration
+
+When setting up each device with the **tinxy-local** integration, you’ll encounter a series of prompts that guide you through the setup. Here’s what to expect:
+
+1. **API Key Prompt**:
+   - The first prompt will ask you to enter your **API key**.
+   - This key is required to link your Home Assistant instance with your Tinxy account.
+   
+2. **Device Selection Prompt**:
+   - After entering the API key, the integration will retrieve a list of devices associated with your account.
+   - You will be prompted to **select a device** from this list. Choose the specific device you wish to configure.
+   - Next need to enter the **IP address** of the selected device in the **Host** column.
+   - This IP should be the local IP address of the device on your network, allowing Home Assistant to communicate directly with it over the local API.
+
+These prompts ensure that each device is correctly authenticated, selected, and connected over your local network. Repeat these steps for each additional device you wish to add to Home Assistant.
+
 Repeat this process for each additional device you wish to add.
 
 ### Step 3: Verify Local API Connectivity (Prior to Adding Each Device)
@@ -40,6 +57,7 @@ Repeat this process for each additional device you wish to add.
    - If the device fails to toggle or respond correctly, try toggling it multiple times.
    - Avoid rapid repeated toggling, as this can cause the local API to freeze.
    - If toggling fails after multiple attempts, contact support for further assistance.
+
 
 ### Step 4: Troubleshooting
 
