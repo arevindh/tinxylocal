@@ -50,6 +50,9 @@ class TinxyServiceListener(ServiceListener):
                 return device
         return None
 
+    def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        print(f"Service {name} updated")
+
 
 zeroconf = Zeroconf()
 listener = TinxyServiceListener()
