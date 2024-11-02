@@ -1,6 +1,5 @@
 """Module for interacting with Tinxy devices locally."""
 
-from datetime import timedelta
 import logging
 
 import aiohttp
@@ -93,6 +92,7 @@ class TinxyLocalHub:
                 url=url,
                 json=payload if method == "POST" else None,
                 headers=HEADERS,
+                timeout=2,
             ) as response:
                 if response.status == 200:
                     return await response.json(content_type=None)

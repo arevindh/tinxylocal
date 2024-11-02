@@ -93,6 +93,7 @@ class TinxyCloud:
             url=self.host_config.api_url + path,
             json=payload,
             headers=headers,
+            timeout=10,
         ) as resp:
             return await resp.json()
             # except:
