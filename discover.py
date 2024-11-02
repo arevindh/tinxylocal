@@ -64,6 +64,10 @@ class TinxyServiceListener(ServiceListener):
             return response.status_code == 200
         except requests.RequestException:
             return False
+    def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
+        if name.startswith("tinxy"):
+            print(f"Service {name} updated")
+
 
 zeroconf = Zeroconf()
 listener = TinxyServiceListener()
