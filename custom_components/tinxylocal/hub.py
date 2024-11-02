@@ -108,7 +108,12 @@ class TinxyLocalHub:
             return self._decode_device_data(device_data, node)
         except TinxyConnectionException as e:
             _LOGGER.error("Failed to update status for node %s: %s", node["name"], e)
-            raise TinxyLocalException("Error fetching device data") from e
+            raise TinxyLocalException(
+                "Error fetching device data, TinxyConnectionException"
+            ) from e
+        except Exception as e:
+            _LOGGER.error("Error fetching device data: %s", e)
+            raise TinxyLocalException("Error fetching device data, Exception") from e
 
     @staticmethod
     def _decode_device_data(data, node):
