@@ -3,10 +3,9 @@
 from datetime import timedelta
 import logging
 
+import aiohttp
+
 from homeassistant.util import Throttle
-from homeassistant.helpers.debounce import Debouncer
-from homeassistant.core import HomeAssistant
-import asyncio
 
 from .const import TINXY_BACKEND
 
@@ -15,6 +14,8 @@ from .encrypt import PasswordEncryptor
 from .tinxycloud import TinxyCloud, TinxyHostConfiguration
 
 _LOGGER = logging.getLogger(__name__)
+
+HEADERS = {"Content-Type": "application/json"}
 
 
 class TinxyConnectionException(Exception):
@@ -33,67 +34,84 @@ class TinxyLocalHub:
         self.host = f"http://{host}"
 
     async def authenticate(self, api_key: str, web_session) -> bool:
-        """Test if we can authenticate with the host."""
-        host_config = TinxyHostConfiguration(api_token=api_key, api_url=TINXY_BACKEND)
-        api = TinxyCloud(host_config=host_config, web_session=web_session)
+        """Authenticate with the host."""
+        api = TinxyCloud(
+            host_config=TinxyHostConfiguration(
+                api_token=api_key, api_url=TINXY_BACKEND
+            ),
+            web_session=web_session,
+        )
         await api.sync_devices()
         return True
 
-    async def _request(
-        self, method: str, endpoint: str, payload: dict = None, web_session=None
-    ) -> dict:
-        """Inner function to handle HTTP requests and error checking."""
-        url = f"{self.host}{endpoint}"
-        headers = {"Content-Type": "application/json"}
+    async def _validate_response(self, endpoint, response):
+        """Validate HTTP response from the device."""
+        if response.status == 200:
+            return await response.json(content_type=None)
+        if response.status == 400:
+            _LOGGER.error(
+                "Request failed at %s with status %d", endpoint, response.status
+            )
+            raise TinxyConnectionException(f"Request error: status {response.status}")
+        return None
 
-        # Choose between POST or GET request based on the method
-        async with web_session.request(
-            method, url=url, json=payload if method == "POST" else None, headers=headers
-        ) as resp:
-            if resp.status == 200:
-                return await resp.json(content_type=None)
-            if resp.status == 400:
-                _LOGGER.error(
-                    "Failed to process request at %s: HTTP status %s", url, resp.status
-                )
-                raise TinxyConnectionException(
-                    f"Failed to process request: HTTP status {resp.status}"
-                )
-            return None
+    async def _send_request(
+        self, method: str, endpoint: str, payload=None, web_session=None
+    ):
+        """Handle HTTP requests and error checking."""
+        url = f"{self.host}{endpoint}"
+        try:
+            async with web_session.request(
+                method,
+                url=url,
+                json=payload if method == "POST" else None,
+                headers=HEADERS,
+            ) as response:
+                return await self._validate_response(endpoint, response)
+        except TimeoutError as e:
+            _LOGGER.error("Request to %s timed out", url)
+            raise TinxyConnectionException("Request timed out") from e
+        except aiohttp.ClientError as e:
+            _LOGGER.error("Client error for request to %s: %s", url, e)
+            raise TinxyConnectionException("Client error occurred") from e
+        except Exception as e:
+            _LOGGER.error("Error for request to %s: %s", url, e)
+            raise TinxyConnectionException("Error occurred") from e
 
     @Throttle(timedelta(seconds=1))
     async def tinxy_toggle(
         self, mqttpass: str, relay_number: int, action: int, web_session
     ) -> bool:
         """Toggle Tinxy device state."""
-        password = PasswordEncryptor(mqttpass).generate_password()
         if action not in [0, 1]:
             _LOGGER.error("Action must be 0 (off) or 1 (on): %s", action)
             return False
 
         payload = {
-            "password": password,
+            "password": PasswordEncryptor(mqttpass).generate_password(),
             "relayNumber": relay_number,
             "action": str(action),
         }
+
         try:
-            # Use the _request function for POST toggle action
-            return await self._request("POST", "/toggle", payload, web_session)
+            return await self._send_request("POST", "/toggle", payload, web_session)
         except TinxyConnectionException as e:
             _LOGGER.error("Error toggling device relay %s: %s", relay_number, e)
             return False
 
     async def fetch_device_data(self, node, web_session):
-        """Fetch data from the device and update the device status."""
+        """Fetch and decode device data."""
         try:
-            # Use the _request function for GET data retrieval
-            device_data = await self._request("GET", "/info", web_session=web_session)
-            return self.decode_device_data(device_data, node)
+            device_data = await self._send_request(
+                "GET", "/info", web_session=web_session
+            )
+            return self._decode_device_data(device_data, node)
         except TinxyConnectionException as e:
             _LOGGER.error("Failed to update status for node %s: %s", node["name"], e)
             raise TinxyLocalException("Error fetching device data") from e
 
-    def decode_device_data(self, data, node):
+    @staticmethod
+    def _decode_device_data(data, node):
         """Decode the device data."""
         decoded_data = {
             "rssi": data["rssi"],
@@ -122,8 +140,7 @@ class TinxyLocalHub:
             ]
             for index, device in enumerate(state_array):
                 if device["type"] in ["light", "fan"]:
-                    brightness_value = int(brightness_array[index] or "000", 10)
-                    device["brightness"] = brightness_value
+                    device["brightness"] = int(brightness_array[index] or "000", 10)
 
         decoded_data["devices"] = state_array
         return decoded_data
