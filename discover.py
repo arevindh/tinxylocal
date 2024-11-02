@@ -56,7 +56,7 @@ class TinxyServiceListener(ServiceListener):
 
     def check_local_api(self, ip_address):
         try:
-            response = requests.get(f"http://{ip_address}/info", timeout=5)
+            response = requests.get(f"http://{ip_address}/info", timeout=1)
             return response.status_code == 200
         except requests.RequestException:
             return False
