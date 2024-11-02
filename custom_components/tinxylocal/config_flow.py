@@ -13,40 +13,38 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import (
-    CONF_ADD_DEVICE,
-    CONF_DEVICE,
-    CONF_DEVICE_ID,
-    CONF_EDIT_DEVICE,
-    CONF_MQTT_PASS,
-    CONF_SETUP_CLOUD,
-    DOMAIN,
-    TINXY_BACKEND,
-)
+from .const import CONF_DEVICE, CONF_DEVICE_ID, CONF_MQTT_PASS, DOMAIN, TINXY_BACKEND
 from .hub import TinxyLocalHub
 from .tinxycloud import TinxyCloud, TinxyHostConfiguration
 
 _LOGGER = logging.getLogger(__name__)
 
+# Schema for entering a new API key
 STEP_USER_DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_API_KEY): str,
     }
 )
 
-STEP_DEVICE_DATA_SCHEMA = vol.Schema(
+# Simplified schema for choosing to use an existing token or enter a new one
+STEP_CHOOSE_TOKEN_SCHEMA = vol.Schema(
     {
-        vol.Required(CONF_HOST): str,
-        vol.Required(CONF_MQTT_PASS): str,
-        vol.Required(CONF_DEVICE_ID): str,
+        vol.Required("token_choice"): vol.In(
+            {
+                "existing": "Use existing API token",
+                "new": "Enter a new API token",
+            }
+        )
     }
 )
 
-CONF_ACTIONS = {
-    CONF_ADD_DEVICE: "Add a new device",
-    CONF_EDIT_DEVICE: "Edit a device",
-    CONF_SETUP_CLOUD: "Reconfigure Cloud API account",
-}
+# Schema for entering device IP and selecting a device
+STEP_DEVICE_DATA_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_HOST): str,
+        vol.Required(CONF_DEVICE_ID): str,
+    }
+)
 
 
 async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
@@ -62,31 +60,8 @@ async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, A
     return await api.get_device_list()
 
 
-async def toggle_device(
-    hass: HomeAssistant, host: str, mqttpass: str, relay_number: int, action: int
-) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
-    web_session = async_get_clientsession(hass)
-    hub = TinxyLocalHub(host)
-
-    data = await hub.tinxy_toggle(
-        mqttpass=mqttpass,
-        relay_number=relay_number,
-        action=action,
-        web_session=web_session,
-    )
-
-    return data
-
-
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
+    """Validate the API key and fetch device list."""
     web_session = async_get_clientsession(hass)
     hub = TinxyLocalHub(TINXY_BACKEND)
 
@@ -97,7 +72,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 
 
 def find_device_by_id(devicelist, target_id):
-    """Find."""
+    """Find device by its ID in the list."""
     for device in devicelist:
         if device["_id"] == target_id:
             return device
@@ -110,113 +85,124 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def __init__(self) -> None:
-        """Initialize local tinxy options flow."""
-        # self.config_entry = config_entry
-        self.selected_device = None
-        self.mqtt_pass = None
-        self.cloud_devices = {}
-        self.host = None
+        """Initialize the config flow."""
         self.api_token = None
-        self.device_uuid = None
-
-        self.discovered_devices = {}
-        self.editing_device = False
+        self.cloud_devices = {}
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Handle the initial step."""
+        """Handle the initial step, checking for saved token or requesting it."""
         errors: dict[str, str] = {}
 
-        # After Picking device
-        if user_input is not None and CONF_DEVICE_ID in user_input:
+        # Check for an existing token in any active config entries
+        for entry in self._async_current_entries():
+            if CONF_API_KEY in entry.data:
+                self.api_token = entry.data[CONF_API_KEY]
+                break
+
+        # If a token exists, present a choice to use it or enter a new one
+        if self.api_token and user_input is None:
+            return self.async_show_form(
+                step_id="choose_token",
+                data_schema=STEP_CHOOSE_TOKEN_SCHEMA,
+            )
+
+        # If the user chooses to use the existing token, proceed to device selection
+        if user_input and "token_choice" in user_input:
+            if user_input["token_choice"] == "existing":
+                return await self.async_step_select_device()
+
+            # If the user chooses to enter a new token, proceed to API key entry
+            return self.async_show_form(
+                step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            )
+
+        # Handle API key submission
+        if user_input and CONF_API_KEY in user_input:
             try:
-                _LOGGER.error(user_input[CONF_DEVICE_ID])
+                # Validate API key and save it
+                await validate_input(self.hass, user_input)
+                self.api_token = user_input[CONF_API_KEY]
 
-                device = None
+                # Proceed to device selection with the new token
+                return await self.async_step_select_device()
 
-                device = find_device_by_id(
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except Exception:
+                _LOGGER.exception("Unexpected exception during validation")
+                errors["base"] = "unknown"
+
+        # Show API key entry form if no token exists
+        return self.async_show_form(
+            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+        )
+
+    async def async_step_choose_token(
+        self, user_input: dict[str, Any]
+    ) -> config_entries.ConfigFlowResult:
+        """Handle the step where user chooses to use the existing token or enter a new one."""
+        if user_input["token_choice"] == "existing":
+            return await self.async_step_select_device()
+        return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA)
+
+    async def async_step_select_device(
+        self, user_input: dict[str, Any] = None
+    ) -> config_entries.ConfigFlowResult:
+        """Select a device from cloud devices and configure IP."""
+        errors = {}
+
+        # Fetch devices from cloud using saved or new API key if not already fetched
+        if not self.cloud_devices:
+            self.cloud_devices = await read_devices(
+                self.hass, {CONF_API_KEY: self.api_token}
+            )
+
+        # Build the selection schema
+        device_options = {
+            item["_id"]: "{} ({})".format(item["name"], item["uuidRef"]["uuid"])
+            for item in self.cloud_devices
+            if "mqttPassword" in item
+            and "uuidRef" in item
+            and "uuid" in item["uuidRef"]
+        }
+
+        if user_input:
+            try:
+                selected_device = find_device_by_id(
                     self.cloud_devices, user_input[CONF_DEVICE_ID]
                 )
-
-                # _LOGGER.error(device, exc_info=device)
-
-                self.mqtt_pass = device["mqttPassword"]
-                self.device_uuid = device["uuidRef"]["uuid"]
-                self.host = user_input[CONF_HOST]
-
-                _LOGGER.error(
-                    {self.mqtt_pass, self.device_uuid, self.host}, exc_info=device
-                )
-                _LOGGER.error(device, exc_info=device)
-
-                data = await toggle_device(self.hass, self.host, self.mqtt_pass, 1, 0)
-
-                _LOGGER.error(data)
+                if not selected_device:
+                    raise ValueError("Device not found")
 
                 return self.async_create_entry(
-                    title=device["name"],
+                    title=selected_device["name"],
                     data={
-                        CONF_DEVICE: device,
-                        CONF_HOST: self.host,
-                        CONF_MQTT_PASS: self.mqtt_pass,
-                        CONF_DEVICE_ID: self.device_uuid,
+                        CONF_DEVICE: selected_device,
+                        CONF_HOST: user_input[CONF_HOST],
+                        CONF_MQTT_PASS: selected_device["mqttPassword"],
+                        CONF_DEVICE_ID: selected_device["uuidRef"]["uuid"],
                         CONF_API_KEY: self.api_token,
                     },
                 )
-                # await validate_input(self.hass, self.api_token)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
 
-        # After submitting api key
-        elif user_input is not None and CONF_API_KEY in user_input:
-            try:
-                await validate_input(self.hass, user_input)
+            except Exception as e:
+                _LOGGER.error("Device selection error: %s", e)
+                errors["base"] = "device_error"
 
-                # Save after validated
-                self.api_token = user_input[CONF_API_KEY]
-
-                self.cloud_devices = await read_devices(self.hass, user_input)
-
-                device_schema_data = {
-                    item["_id"]: "{} ({})".format(item["name"], item["uuidRef"]["uuid"])
-                    for item in self.cloud_devices
-                    if "mqttPassword" in item
-                    and "uuidRef" in item
-                    and "uuid" in item["uuidRef"]
-                }
-
-                device_schema = vol.Schema(
-                    {
-                        vol.Required("device_id", default=None): vol.In(
-                            device_schema_data
-                        ),
-                        vol.Required(CONF_HOST): str,
-                    }
-                )
-
-                return self.async_show_form(
-                    step_id="user",
-                    data_schema=device_schema,
-                    description_placeholders=self.cloud_devices,
-                    errors=errors,
-                )
-
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAuth:
-                errors["base"] = "invalid_auth"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+        # Show device selection form with IP configuration
+        device_schema = vol.Schema(
+            {
+                vol.Required(CONF_DEVICE_ID): vol.In(device_options),
+                vol.Required(CONF_HOST): str,
+            }
+        )
 
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="select_device", data_schema=device_schema, errors=errors
         )
 
 
@@ -226,3 +212,51 @@ class CannotConnect(HomeAssistantError):
 
 class InvalidAuth(HomeAssistantError):
     """Error to indicate there is invalid auth."""
+
+
+class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle Tinxy Local options to change API token."""
+
+    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+        """Initialize options flow."""
+        self.config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Manage the options to update API token."""
+        if user_input is not None:
+            # Validate the new token if provided
+            try:
+                await validate_input(self.hass, user_input)
+                # Update entry with the new API key
+                self.hass.config_entries.async_update_entry(
+                    self.config_entry,
+                    data={
+                        **self.config_entry.data,
+                        CONF_API_KEY: user_input[CONF_API_KEY],
+                    },
+                )
+                return self.async_create_entry(title="", data={})
+            except InvalidAuth:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=STEP_USER_DATA_SCHEMA,
+                    errors={"base": "invalid_auth"},
+                )
+            except CannotConnect:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=STEP_USER_DATA_SCHEMA,
+                    errors={"base": "cannot_connect"},
+                )
+            except Exception:
+                _LOGGER.exception("Unexpected exception during token update")
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=STEP_USER_DATA_SCHEMA,
+                    errors={"base": "unknown"},
+                )
+
+        # Show form for updating API token
+        return self.async_show_form(step_id="init", data_schema=STEP_USER_DATA_SCHEMA)

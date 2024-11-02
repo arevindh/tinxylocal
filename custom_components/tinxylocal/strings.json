@@ -9,6 +9,13 @@
           "device_id": "Device ID",
           "api_key": "[%key:common::config_flow::data::api_key%]"
         }
+      },
+      "choose_token": {
+        "title": "API Token Options",
+        "description": "Choose how you would like to proceed with the API token.",
+        "data": {
+          "token_choice": "Token Option"
+        }
       }
     },
     "error": {
@@ -18,6 +25,10 @@
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+    },
+    "options": {
+      "token_choice_existing": "Use existing API token",
+      "token_choice_new": "Enter a new API token"
     }
   }
 }
