@@ -7,6 +7,7 @@ This guide will help you set up the **tinxy-local** integration for Home Assista
 
 1. **Home Assistant Community Store (HACS)**: Ensure HACS is installed in your Home Assistant setup. HACS is required to add third-party custom integrations.
 2. **API Key**: Obtain an API key for the tinxy-local integration.
+3. **IP Addess**: Ip address of all Tinxy Devices [How to get](discover.py)
 
 ## Installation Steps
 
