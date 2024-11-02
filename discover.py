@@ -4,6 +4,19 @@ from zeroconf._exceptions import BadTypeInNameException
 import json
 
 
+def check_local_control(addr):
+    # Check if the local control is available by poking at /info
+    try:
+        url = f'http://{addr}/info'
+        response = requests.get(url, timeout=1)
+        if response.status_code == 200:
+            return True
+        else:
+            return False
+    except requests.exceptions.ConnectionError:
+        return False
+
+
 class TinxyServiceListener(ServiceListener):
     def __init__(self):
         self.tinxy_devices = []  # To store Tinxy devices from the API
@@ -19,6 +32,7 @@ class TinxyServiceListener(ServiceListener):
                         ip_address = '.'.join(map(str, info.addresses[0]))
                         print(f"Service Name: {name}")
                         print(f"Address: {ip_address}")
+                        print(f"Supports local control: {check_local_control(ip_address)}")
                         print(f"Port: {info.port}")
                         print(f"Device Name : {matched_device.get('name')}")
 
@@ -27,7 +41,7 @@ class TinxyServiceListener(ServiceListener):
                             print("Local API: Enabled")
                         else:
                             print("Local API: Not Enabled")
-                        
+
                         print("--------------------------------------------------")
                     else:
                         print(f"No matching API device found for service: {name}")
