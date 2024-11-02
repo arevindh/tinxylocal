@@ -4,19 +4,6 @@ from zeroconf._exceptions import BadTypeInNameException
 import json
 
 
-def check_local_control(addr):
-    # Check if the local control is available by poking at /info
-    try:
-        url = f'http://{addr}/info'
-        response = requests.get(url, timeout=1)
-        if response.status_code == 200:
-            return True
-        else:
-            return False
-    except requests.exceptions.ConnectionError:
-        return False
-
-
 class TinxyServiceListener(ServiceListener):
     def __init__(self):
         self.tinxy_devices = []  # To store Tinxy devices from the API
@@ -29,19 +16,14 @@ class TinxyServiceListener(ServiceListener):
                     device_id_suffix = name[5:10]
                     matched_device = self.find_matching_device(device_id_suffix)
                     if matched_device:
-                        ip_address = '.'.join(map(str, info.addresses[0]))
+                        ip_address = ".".join(map(str, info.addresses[0]))
                         print(f"Service Name: {name}")
                         print(f"Address: {ip_address}")
-                        print(f"Supports local control: {check_local_control(ip_address)}")
+                        print(
+                            f"Supports local control: {'Yes' if self.check_local_api(ip_address) else 'No'}"
+                        )
                         print(f"Port: {info.port}")
                         print(f"Device Name : {matched_device.get('name')}")
-
-                        # Check if local API is enabled
-                        if self.check_local_api(ip_address):
-                            print("Local API: Enabled")
-                        else:
-                            print("Local API: Not Enabled")
-
                         print("--------------------------------------------------")
                     else:
                         print(f"No matching API device found for service: {name}")
@@ -78,6 +60,7 @@ class TinxyServiceListener(ServiceListener):
             return response.status_code == 200
         except requests.RequestException:
             return False
+
     def update_service(self, zc: Zeroconf, type_: str, name: str) -> None:
         if name.startswith("tinxy"):
             print(f"Service {name} updated")
