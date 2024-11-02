@@ -16,10 +16,18 @@ class TinxyServiceListener(ServiceListener):
                     device_id_suffix = name[5:10]
                     matched_device = self.find_matching_device(device_id_suffix)
                     if matched_device:
+                        ip_address = '.'.join(map(str, info.addresses[0]))
                         print(f"Service Name: {name}")
-                        print(f"Address: {'.'.join(map(str, info.addresses[0]))}")
+                        print(f"Address: {ip_address}")
                         print(f"Port: {info.port}")
                         print(f"Device Name : {matched_device.get('name')}")
+
+                        # Check if local API is enabled
+                        if self.check_local_api(ip_address):
+                            print("Local API: Enabled")
+                        else:
+                            print("Local API: Not Enabled")
+                        
                         print("--------------------------------------------------")
                     else:
                         print(f"No matching API device found for service: {name}")
@@ -50,6 +58,12 @@ class TinxyServiceListener(ServiceListener):
                 return device
         return None
 
+    def check_local_api(self, ip_address):
+        try:
+            response = requests.get(f"http://{ip_address}/info", timeout=5)
+            return response.status_code == 200
+        except requests.RequestException:
+            return False
 
 zeroconf = Zeroconf()
 listener = TinxyServiceListener()
