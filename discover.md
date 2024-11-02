@@ -26,7 +26,7 @@
    pip install -r requirements.txt
    ```
 
-5. Run the script and enter the Bearer token:
+5. Run the script
 
    ```bash
    python discover.py
