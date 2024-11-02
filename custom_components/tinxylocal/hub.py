@@ -44,6 +44,28 @@ class TinxyLocalHub:
         await api.sync_devices()
         return True
 
+    async def validate_ip(self, web_session, chip_id=None) -> str:
+        """Validate the device's local API by checking the /info endpoint.
+
+        Returns:
+            str: Status string indicating the result of the IP validation.
+                 - "ok" if the response is 200 and accessible.
+                 - "api_not_available" if the response is 400.
+                 - "connection_error" for other errors or no response.
+
+        """
+        try:
+            response = await self._send_request("GET", "/info", web_session=web_session)
+            if response is not None:
+                if chip_id:
+                    if response["chip_id"] == chip_id:
+                        return "ok"
+                    return "wrong_chip_id"
+                return "ok"
+            return "api_not_available"  # noqa: TRY300
+        except TinxyConnectionException as _e:
+            return "connection_error"
+
     async def _validate_response(self, endpoint, response):
         """Validate HTTP response from the device."""
         if response.status == 200:
@@ -60,6 +82,11 @@ class TinxyLocalHub:
     ):
         """Handle HTTP requests and error checking."""
         url = f"{self.host}{endpoint}"
+
+        def handle_exception(message: str, exception: Exception | None):
+            _LOGGER.error(message)
+            raise TinxyConnectionException(message) from exception
+
         try:
             async with web_session.request(
                 method,
@@ -67,18 +94,19 @@ class TinxyLocalHub:
                 json=payload if method == "POST" else None,
                 headers=HEADERS,
             ) as response:
-                return await self._validate_response(endpoint, response)
+                if response.status == 200:
+                    return await response.json(content_type=None)
+                if response.status == 400:
+                    handle_exception(f"Request error: status {response.status}")
+                else:
+                    handle_exception(f"Unexpected error: status {response.status}")
         except TimeoutError as e:
-            _LOGGER.error("Request to %s timed out", url)
-            raise TinxyConnectionException("Request timed out") from e
+            handle_exception(f"Request to {url} timed out", e)
         except aiohttp.ClientError as e:
-            _LOGGER.error("Client error for request to %s: %s", url, e)
-            raise TinxyConnectionException("Client error occurred") from e
-        except Exception as e:
-            _LOGGER.error("Error for request to %s: %s", url, e)
-            raise TinxyConnectionException("Error occurred") from e
+            handle_exception(f"Client error for request to {url}: {e}", e)
+        except Exception as e:  # noqa: BLE001
+            handle_exception(f"Error for request to {url}: {e}", e)
 
-    @Throttle(timedelta(seconds=1))
     async def tinxy_toggle(
         self, mqttpass: str, relay_number: int, action: int, web_session
     ) -> bool:

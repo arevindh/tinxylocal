@@ -47,6 +47,13 @@ STEP_DEVICE_DATA_SCHEMA = vol.Schema(
 )
 
 
+async def validate_device(hass: HomeAssistant, host_ip, chip_id) -> dict[str, Any]:
+    """Validate the device IP and selected device."""
+    web_session = async_get_clientsession(hass)
+    hub = TinxyLocalHub(host_ip)
+    return hub.validate_ip(web_session, host_ip, chip_id)
+
+
 async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Read Device List."""
     web_session = async_get_clientsession(hass)
@@ -175,8 +182,31 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 selected_device = find_device_by_id(
                     self.cloud_devices, user_input[CONF_DEVICE_ID]
                 )
+
                 if not selected_device:
-                    raise ValueError("Device not found")
+                    raise ValueError("Device not found")  # noqa: TRY301
+
+                web_session = async_get_clientsession(self.hass)
+                hub = TinxyLocalHub(user_input[CONF_HOST])
+                validate_status = await hub.validate_ip(
+                    web_session,
+                    selected_device["uuidRef"]["uuid"],
+                )
+
+                _LOGGER.debug("Device selection status: %s", validate_status)
+
+                if validate_status == "wrong_chip_id":
+                    raise ValueError(  # noqa: TRY301
+                        "Wrong Ip address, chip id should be {}".format(
+                            selected_device["uuidRef"]["uuid"]
+                        )
+                    )
+
+                if validate_status == "api_not_available":
+                    raise ValueError("Local API not available.")  # noqa: TRY301
+
+                if validate_status == "connection_error":
+                    raise ValueError("Connection error.")  # noqa: TRY301
 
                 return self.async_create_entry(
                     title=selected_device["name"],
@@ -189,9 +219,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     },
                 )
 
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 _LOGGER.error("Device selection error: %s", e)
-                errors["base"] = "device_error"
+                errors["base"] = str(e)
 
         # Show device selection form with IP configuration
         device_schema = vol.Schema(
