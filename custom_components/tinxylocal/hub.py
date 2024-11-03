@@ -177,3 +177,24 @@ class TinxyLocalHub:
 
         decoded_data["devices"] = state_array
         return decoded_data
+
+    @staticmethod
+    def get_device_icon(device_type: str) -> str:
+        """Generate an icon based on the device type."""
+        if device_type == "Heater":
+            return "mdi:radiator"
+        if device_type == "Tubelight":
+            return "mdi:lightbulb-fluorescent-tube"
+        if device_type in ["LED Bulb", "Dimmable Light", "LED Dimmable Bulb"]:
+            return "mdi:lightbulb"
+        if device_type == "Music System":
+            return "mdi:music"
+        if device_type == "Fan":
+            return "mdi:fan"
+        if device_type == "Socket":
+            return "mdi:power-socket-eu"
+        if device_type == "TV":
+            return "mdi:television"
+        if device_type == "Lock":
+            return "mdi:lock"
+        return "mdi:toggle-switch"

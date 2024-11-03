@@ -22,25 +22,30 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
     """Set up Tinxy switches based on a config entry."""
-    # Cast coordinator to TinxyUpdateCoordinator so type checker recognizes custom attributes
     coordinator = cast(
         TinxyUpdateCoordinator, hass.data[DOMAIN][entry.entry_id]["coordinator"]
     )
     hubs = hass.data[DOMAIN][entry.entry_id]["hubs"]
 
     switches = []
+    device_types = entry.data["device"].get("deviceTypes", [])
     for node in coordinator.nodes:
         device_name = node["name"]
+
         for index, device in enumerate(node["devices"]):
             if device["type"].lower():
                 relay_number = index + 1
                 entity_name = f"{device_name} {device['name']}"
+                device_type = (
+                    device_types[index] if index < len(device_types) else "Socket"
+                )
                 switch = TinxySwitch(
                     coordinator=coordinator,
                     hub=hubs[0],
                     node_id=node["device_id"],
                     relay_number=relay_number,
                     name=entity_name,
+                    device_type=device_type,
                 )
                 switches.append(switch)
 
@@ -57,20 +62,28 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         node_id: str,
         relay_number: int,
         name: str,
+        device_type: str,
     ) -> None:
         """Initialize the Tinxy switch."""
         super().__init__(coordinator)
-        self.coordinator = coordinator  # No need to cast
+        self.coordinator = coordinator
         self.hub = hub
         self.node_id = node_id
         self.relay_number = relay_number
         self._attr_name = name
         self._attr_unique_id = f"{node_id}_{relay_number}"
-        self._state = None
+        self._device_type = device_type
 
     @property
     def available(self) -> bool:
         """Return True if the device status data is available and valid."""
+        # Return False if coordinator data is None to handle cases where data has not yet loaded
+        if self.coordinator.data is None:
+            _LOGGER.warning(
+                "Coordinator data is not yet available for node %s", self.node_id
+            )
+            return False
+
         node_data = self.coordinator.data.get(self.node_id, {})
         return bool(node_data) and self.node_id in self.coordinator.device_metadata
 
@@ -118,6 +131,11 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
             self.node_id,
         )
         return False
+
+    @property
+    def icon(self) -> str:
+        """Return the icon of the switch."""
+        return self.hub.get_device_icon(self._device_type)
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
