@@ -1,29 +1,38 @@
 """Switch platform for Tinxy integration."""
 
+import asyncio
 import logging
+from typing import Any, cast
 
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.helpers import device_registry as dr
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .coordinator import TinxyUpdateCoordinator
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass, entry, async_add_entities):
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+) -> None:
     """Set up Tinxy switches based on a config entry."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    # Cast coordinator to TinxyUpdateCoordinator so type checker recognizes custom attributes
+    coordinator = cast(
+        TinxyUpdateCoordinator, hass.data[DOMAIN][entry.entry_id]["coordinator"]
+    )
     hubs = hass.data[DOMAIN][entry.entry_id]["hubs"]
 
-    # Retrieve the node configuration directly from the coordinator
     switches = []
     for node in coordinator.nodes:
         device_name = node["name"]
         for index, device in enumerate(node["devices"]):
             if device["type"].lower():
-                # Adjust relay_number to start from 1 instead of 0
                 relay_number = index + 1
                 entity_name = f"{device_name} {device['name']}"
                 switch = TinxySwitch(
@@ -43,14 +52,15 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
 
     def __init__(
         self,
-        coordinator,
+        coordinator: TinxyUpdateCoordinator,
         hub: TinxyLocalHub,
         node_id: str,
         relay_number: int,
         name: str,
-    ):
+    ) -> None:
         """Initialize the Tinxy switch."""
         super().__init__(coordinator)
+        self.coordinator = coordinator  # No need to cast
         self.hub = hub
         self.node_id = node_id
         self.relay_number = relay_number
@@ -59,32 +69,29 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         self._state = None
 
     @property
-    def available(self):
+    def available(self) -> bool:
         """Return True if the device status data is available and valid."""
         node_data = self.coordinator.data.get(self.node_id, {})
         return bool(node_data) and self.node_id in self.coordinator.device_metadata
 
     @property
-    def device_info(self):
+    def device_info(self) -> DeviceInfo | None:
         """Return device information to associate entities with the device."""
-        # Ensure device_info only accesses populated metadata
         metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        device_name = (
+            self._attr_name.split(" ")[0] if self._attr_name else "Unknown Device"
+        )
 
         return {
             "identifiers": {(DOMAIN, self.node_id)},
-            "name": self._attr_name.split(" ")[0],
+            "name": device_name,
             "manufacturer": "Tinxy",
-            "model": metadata.get("model", "Tinxy Smart Device"),
+            "model": metadata.get("model", "Smart Device"),
             "sw_version": metadata.get("firmware", "Unknown"),
-            "via_device": (DOMAIN, self.node_id),
-            "connections": {(dr.CONNECTION_IP, metadata.get("ip"))}
-            if metadata.get("ip")
-            else None,
-            "suggested_area": metadata.get("ssid"),
         }
 
     @property
-    def is_on(self):
+    def is_on(self) -> bool | None:
         """Return the status of the switch."""
         # Check if coordinator data is available and fetch data based on node_id
         if self.coordinator.data is None:
@@ -112,33 +119,26 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         )
         return False
 
-    async def async_turn_on(self, **kwargs):
+    async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0][
-                "mqtt_password"
-            ],  # Use the first node's MQTT password
+            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
             relay_number=self.relay_number,
             action=1,
             web_session=self.coordinator.hass.helpers.aiohttp_client.async_get_clientsession(),
         )
         if result:
+            await asyncio.sleep(0.5)
             await self.coordinator.async_request_refresh()
 
-    async def async_turn_off(self, **kwargs):
+    async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
         result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0][
-                "mqtt_password"
-            ],  # Use the first node's MQTT password
+            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
             relay_number=self.relay_number,
             action=0,
             web_session=self.coordinator.hass.helpers.aiohttp_client.async_get_clientsession(),
         )
         if result:
+            await asyncio.sleep(0.5)
             await self.coordinator.async_request_refresh()
-
-    @property
-    def available(self):
-        """Return if entity is available."""
-        return self.coordinator.last_update_success

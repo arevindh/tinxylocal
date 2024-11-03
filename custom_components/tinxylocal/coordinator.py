@@ -1,17 +1,14 @@
 """Tinxy Node Update Coordinator."""
 
-import asyncio
 from datetime import timedelta
 import logging
-
-from .const import DOMAIN
+from typing import Any
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.debounce import Debouncer
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-
 from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .const import DOMAIN
 from .hub import TinxyConnectionException, TinxyLocalException, TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
@@ -21,7 +18,13 @@ REQUEST_REFRESH_DELAY = 0.50
 class TinxyUpdateCoordinator(DataUpdateCoordinator):
     """Coordinator to fetch data directly from Tinxy nodes."""
 
-    def __init__(self, hass: HomeAssistant, nodes: list[dict], web_session) -> None:
+    device_metadata: dict[str, dict[str, Any]]
+    nodes: list[dict[str, Any]]
+
+    def __init__(
+        self, hass: HomeAssistant, nodes: list[dict[str, Any]], web_session
+    ) -> None:
+        """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
@@ -29,10 +32,10 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=5),
         )
         self.hass = hass
-        self.nodes = nodes
+        self.nodes = nodes  # Type-annotated as a list of dictionaries
         self.web_session = web_session
         self.hubs = [TinxyLocalHub(node["ip_address"]) for node in nodes]
-        self.device_metadata = {}
+        self.device_metadata = {}  # Type-annotated as a dictionary
 
     async def _async_update_data(self):
         """Fetch data from each configured Tinxy node."""

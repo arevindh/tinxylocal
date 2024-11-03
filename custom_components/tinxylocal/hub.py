@@ -4,8 +4,6 @@ import logging
 
 import aiohttp
 
-from homeassistant.util import Throttle
-
 from .const import TINXY_BACKEND
 
 # pylint: disable=no-name-in-module
@@ -97,9 +95,11 @@ class TinxyLocalHub:
                 if response.status == 200:
                     return await response.json(content_type=None)
                 if response.status == 400:
-                    handle_exception(f"Request error: status {response.status}")
+                    handle_exception(f"Request error: status {response.status}", None)
                 else:
-                    handle_exception(f"Unexpected error: status {response.status}")
+                    handle_exception(
+                        f"Unexpected error: status {response.status}", None
+                    )
         except TimeoutError as e:
             handle_exception(f"Request to {url} timed out", e)
         except aiohttp.ClientError as e:
