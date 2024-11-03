@@ -3,6 +3,7 @@
 import logging
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
@@ -56,6 +57,31 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         self._attr_name = name
         self._attr_unique_id = f"{node_id}_{relay_number}"
         self._state = None
+
+    @property
+    def available(self):
+        """Return True if the device status data is available and valid."""
+        node_data = self.coordinator.data.get(self.node_id, {})
+        return bool(node_data) and self.node_id in self.coordinator.device_metadata
+
+    @property
+    def device_info(self):
+        """Return device information to associate entities with the device."""
+        # Ensure device_info only accesses populated metadata
+        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+
+        return {
+            "identifiers": {(DOMAIN, self.node_id)},
+            "name": self._attr_name.split(" ")[0],
+            "manufacturer": "Tinxy",
+            "model": metadata.get("model", "Tinxy Smart Device"),
+            "sw_version": metadata.get("firmware", "Unknown"),
+            "via_device": (DOMAIN, self.node_id),
+            "connections": {(dr.CONNECTION_IP, metadata.get("ip"))}
+            if metadata.get("ip")
+            else None,
+            "suggested_area": metadata.get("ssid"),
+        }
 
     @property
     def is_on(self):

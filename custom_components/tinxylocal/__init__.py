@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY, CONF_HOST, Platform
+from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
@@ -28,12 +28,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Extract device configurations
     device_data = entry.data[CONF_DEVICE]
+
     nodes = [
         {
             "ip_address": entry.data[CONF_HOST],
             "mqtt_password": entry.data[CONF_MQTT_PASS],
             "device_id": device_data["_id"],
             "name": device_data["name"],
+            "model": device_data["typeId"]["name"],
+            "unique_id": device_data["_id"],
             "devices": [
                 {"name": dev_name, "type": dev_type}
                 for dev_name, dev_type in zip(
