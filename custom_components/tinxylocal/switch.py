@@ -75,6 +75,11 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         self._device_type = device_type
 
     @property
+    def unique_id(self) -> str:
+        """Return a unique ID for the entity."""
+        return self._attr_unique_id
+
+    @property
     def available(self) -> bool:
         """Return True if the device status data is available and valid."""
         # Return False if coordinator data is None to handle cases where data has not yet loaded
