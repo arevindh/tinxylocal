@@ -55,9 +55,7 @@ Repeat this process for each additional device you wish to add.
 1. **Check Device’s Local API Support**:
    - For each device, visit `[device_ip]/info` to confirm local API support is enabled.
 2. **Local API Connection Troubleshooting**:
-   - If the device fails to toggle or respond correctly, try toggling it multiple times.
-   - Avoid rapid repeated toggling, as this can cause the local API to freeze.
-   - If toggling fails after multiple attempts, contact support for further assistance.
+   - If the device fails to toggle or respond correctly, Avoid rapid repeated toggling, as this can cause the local API to freeze, If toggling fails after multiple attempts, try resetting your device.
 
 
 ### Step 4: Troubleshooting
