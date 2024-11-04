@@ -13,10 +13,10 @@ This guide will help you set up the **tinxy-local** integration for Home Assista
 
 ### Step 1: Install the Tinxy-Local Integration
 
-1. Open the [tinxy-local GitHub repository](https://github.com/arevindh/tinxy-local).
+1. Open the [tinxy-local GitHub repository](https://github.com/arevindh/tinxy-local](https://github.com/arevindh/tinxylocal).
 2. **Add to HACS**:
    - Go to HACS in your Home Assistant UI.
-   - Add the tinxy-local integration by entering the repository URL.
+   - Add the tinxy-local integration by entering the repository URL `https://github.com/arevindh/tinxylocal`.
    - Follow the prompts to complete the installation.
    - **Restart Home Assistant** to ensure the new integration loads properly.
 
@@ -30,7 +30,7 @@ For each device you want to add:
 2. **Add the Device Using the Tinxy Integration**:
    - Navigate to **Settings** > **Devices & Services** in Home Assistant.
    - Click **Add Integration** and search for **tinxy-local**.
-   - When prompted, enter the API key to link the device with the integration.
+   - When prompted, enter the API key to link the device with the integration (If you have an exising device you can choese to use existing token ).
 
 ### Prompt Details for Tinxy Local Integration
 
@@ -44,7 +44,7 @@ When setting up each device with the **tinxy-local** integration, you’ll encou
    - After entering the API key, the integration will retrieve a list of devices associated with your account.
    - You will be prompted to **select a device** from this list. Choose the specific device you wish to configure.
    - Next need to enter the **IP address** of the selected device in the **Host** column.
-   - This IP should be the local IP address of the device on your network, allowing Home Assistant to communicate directly with it over the local API.
+   - This IP should be the local IP address of the device on your network (Adding will fail if the device is not correct / Local API is not available), allowing Home Assistant to communicate directly with it over the local API.
 
 These prompts ensure that each device is correctly authenticated, selected, and connected over your local network. Repeat these steps for each additional device you wish to add to Home Assistant.
 
