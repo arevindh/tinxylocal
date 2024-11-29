@@ -207,6 +207,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
                 if validate_status == "connection_error":
                     raise ValueError("Connection error.")  # noqa: TRY301
+                
+                # Check if 'devices' is an empty list and 'deviceTypes' has a single data
+                if isinstance(selected_device.get("devices"), list) and not selected_device["devices"]:
+                    if isinstance(selected_device.get("deviceTypes"), list) and len(selected_device["deviceTypes"]) == 1:
+                        # Set 'devices' to be the same as 'deviceTypes'
+                        selected_device["devices"] = selected_device["deviceTypes"]
 
                 return self.async_create_entry(
                     title=selected_device["name"],
