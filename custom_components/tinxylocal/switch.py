@@ -7,9 +7,11 @@ from typing import Any, cast
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 
 from .const import DOMAIN
 from .coordinator import TinxyUpdateCoordinator
@@ -148,7 +150,7 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
             mqttpass=self.coordinator.nodes[0]["mqtt_password"],
             relay_number=self.relay_number,
             action=1,
-            web_session=self.coordinator.hass.helpers.aiohttp_client.async_get_clientsession(),
+            web_session=async_get_clientsession(self.coordinator.hass),
         )
         if result:
             await asyncio.sleep(0.5)
@@ -160,7 +162,7 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
             mqttpass=self.coordinator.nodes[0]["mqtt_password"],
             relay_number=self.relay_number,
             action=0,
-            web_session=self.coordinator.hass.helpers.aiohttp_client.async_get_clientsession(),
+            web_session=async_get_clientsession(self.coordinator.hass),
         )
         if result:
             await asyncio.sleep(0.5)
