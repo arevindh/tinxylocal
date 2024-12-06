@@ -7,7 +7,7 @@
   "documentation": "https://www.home-assistant.io/integrations/tinxylocal",
   "homekit": {},
   "iot_class": "local_polling",
-  "requirements": ["pyarmor==9.0.3"],
+  "requirements": ["pyarmor==9.0.6"],
   "ssdp": [],
   "zeroconf": [
     {
@@ -15,5 +15,6 @@
       "name": "tinxy*"
     }
   ],
-  "version": "0.0.7"
+  "version": "1.1.0",
+  "homeassistant": ">=2024.12.0"
 }
