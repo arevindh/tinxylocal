@@ -38,7 +38,7 @@ class TinxyPollingNumber(RestoreNumber, NumberEntity):
         self._device_id = device_id
         self._attr_name = name
         self._attr_unique_id = f"{device_id}_polling_interval"
-        self._attr_native_min_value = 1  # Minimum interval in seconds
+        self._attr_native_min_value = 3  # Minimum interval in seconds
         self._attr_native_max_value = 600  # Maximum interval in seconds
         self._attr_native_step = 1  # Increment step
         self._attr_native_value = 5  # Default polling interval in seconds
