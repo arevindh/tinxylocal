@@ -47,7 +47,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ]
 
     # Initialize TinxyLocalHub instances for each node
-    hubs = [TinxyLocalHub(node["ip_address"]) for node in nodes]
+    hubs = [TinxyLocalHub(hass, node["ip_address"]) for node in nodes]
 
     # Initialize the coordinator with the list of nodes and web session
     coordinator = TinxyUpdateCoordinator(hass, nodes, web_session)

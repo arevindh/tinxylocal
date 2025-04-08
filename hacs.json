@@ -1,5 +1,6 @@
 {
-    "name": "Tinxy Local Smart Devices",
+    "name": "Tinxy Local - Smart Devices",
     "render_readme": true,
-    "domains": ["switch","light"]
+    "domains": ["switch"],
+    "homeassistant": "2025.4.0"
 }
