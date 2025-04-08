@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -19,10 +21,28 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER]
 
 
+def set_executable_permissions(directory: str):
+    """Ensure all files in the directory are executable."""
+    for root, _, files in os.walk(directory):
+        for file in files:
+            file_path = os.path.join(root, file)
+            if not os.access(file_path, os.X_OK):
+                current_perms = os.stat(file_path).st_mode
+                os.chmod(file_path, current_perms | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Tinxy from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
+
+    # Set executable permissions for files in the build directory
+    integration_path = hass.config.path("custom_components/tinxylocal/build")
+    if os.path.exists(integration_path):
+        _LOGGER.info("Setting executable permissions for files in %s", integration_path)
+        set_executable_permissions(integration_path)
+    else:
+        _LOGGER.warning("Build directory does not exist: %s", integration_path)
 
     web_session = async_get_clientsession(hass)
 
