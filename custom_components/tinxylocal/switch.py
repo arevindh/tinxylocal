@@ -86,7 +86,7 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         """Return True if the device status data is available and valid."""
         # Return False if coordinator data is None to handle cases where data has not yet loaded
         if self.coordinator.data is None:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Coordinator data is not yet available for node %s", self.node_id
             )
             return False
@@ -115,14 +115,14 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         """Return the status of the switch."""
         # Check if coordinator data is available and fetch data based on node_id
         if self.coordinator.data is None:
-            _LOGGER.warning(
+            _LOGGER.debug(
                 "Coordinator data is not available for node %s", self._attr_unique_id
             )
             return False  # Default to off if data is not available
 
         node_data = self.coordinator.data.get(self.node_id, {})
         if not node_data:
-            _LOGGER.warning("Node data is missing for node %s", self.node_id)
+            _LOGGER.debug("Node data is missing for node %s", self.node_id)
             return False
 
         # Access the device data within the node data
@@ -132,7 +132,7 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
         if len(device_data) >= self.relay_number:
             return device_data[self.relay_number - 1].get("status") == "on"
 
-        _LOGGER.warning(
+        _LOGGER.debug(
             "Device data is unavailable for relay number %s in node %s",
             self.relay_number,
             self.node_id,
@@ -150,7 +150,6 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
             mqttpass=self.coordinator.nodes[0]["mqtt_password"],
             relay_number=self.relay_number,
             action=1,
-            web_session=async_get_clientsession(self.coordinator.hass),
         )
         if result:
             await asyncio.sleep(0.5)
@@ -162,7 +161,6 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
             mqttpass=self.coordinator.nodes[0]["mqtt_password"],
             relay_number=self.relay_number,
             action=0,
-            web_session=async_get_clientsession(self.coordinator.hass),
         )
         if result:
             await asyncio.sleep(0.5)

@@ -3,12 +3,12 @@
 import logging
 
 import aiohttp
+import asyncio 
 
 from .const import TINXY_BACKEND
 
-# pylint: disable=no-name-in-module
-from .encrypt import PasswordEncryptor
 from .tinxycloud import TinxyCloud, TinxyHostConfiguration
+import platform
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,10 +25,11 @@ class TinxyLocalException(Exception):
 
 class TinxyLocalHub:
     """TinxyLocalHub class for interacting with Tinxy devices locally."""
-
-    def __init__(self, host: str) -> None:
-        """Initialize with the device host."""
+    def __init__(self, hass, host: str) -> None:
+        """Initialize with Home Assistant instance and the device host."""
+        self.hass = hass
         self.host = f"http://{host}"
+        self.ip_address = host
 
     async def authenticate(self, api_key: str, web_session) -> bool:
         """Authenticate with the host."""
@@ -108,23 +109,73 @@ class TinxyLocalHub:
             handle_exception(f"Error for request to {url}: {e}", e)
 
     async def tinxy_toggle(
-        self, mqttpass: str, relay_number: int, action: int, web_session
-    ) -> bool:
-        """Toggle Tinxy device state."""
+        self, mqttpass: str, relay_number: int, action: int) -> bool:
+        """Toggle Tinxy device state using the CLI executable."""
         if action not in [0, 1]:
             _LOGGER.error("Action must be 0 (off) or 1 (on): %s", action)
             return False
 
-        payload = {
-            "password": PasswordEncryptor(mqttpass).generate_password(),
-            "relayNumber": relay_number,
-            "action": str(action),
+        action_str = "on" if action == 1 else "off"
+
+        INTEGRATION_PATH = self.hass.config.path(f"custom_components/tinxylocal/build")
+        # Determine the correct executable based on the system architecture
+        system_arch = platform.machine()
+        arch_table = {
+            "x86_64": ["x64", "x86_64", "amd64", "intel"],
+            "armv7l": ["armv7l"],
+            "armv6l": ["armv6l"],
+            "aarch64": ["aarch64", "arm64"],
+            "win": ["win"],
         }
 
+        executable_path = None
+        for arch, aliases in arch_table.items():
+            if system_arch in aliases or system_arch.startswith(arch):
+                if arch == "x86_64":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_amd64"
+                elif arch == "armv7l":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv7"
+                elif arch == "armv6l":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv6"
+                elif arch == "aarch64":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_arm64"
+                elif arch == "win":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_windows_amd64.exe"
+                break
+
+        if not executable_path:
+            _LOGGER.error("Unsupported system architecture: %s", system_arch)
+            return False
+
+        command = [
+            executable_path,
+            "-action", str(action),
+            "-ip", self.ip_address,
+            "-password", mqttpass,
+            "-relay", str(relay_number),
+        ]
+
         try:
-            return await self._send_request("POST", "/toggle", payload, web_session)
-        except TinxyConnectionException as e:
-            _LOGGER.error("Error toggling device relay %s: %s", relay_number, e)
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                _LOGGER.info("Successfully toggled relay %s to %s", relay_number, action_str)
+                return True
+            else:
+                _LOGGER.error(
+                    "Error toggling relay %s to %s. Stderr: %s",
+                    relay_number,
+                    action_str,
+                    stderr.decode().strip(),
+                )
+                return False
+        except Exception as e:
+            _LOGGER.error("Failed to execute toggle command: %s", e)
             return False
 
     async def fetch_device_data(self, node, web_session):

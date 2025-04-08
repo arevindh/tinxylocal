@@ -50,7 +50,7 @@ STEP_DEVICE_DATA_SCHEMA = vol.Schema(
 async def validate_device(hass: HomeAssistant, host_ip, chip_id) -> dict[str, Any]:
     """Validate the device IP and selected device."""
     web_session = async_get_clientsession(hass)
-    hub = TinxyLocalHub(host_ip)
+    hub = TinxyLocalHub(hass, host_ip)
     return hub.validate_ip(web_session, host_ip, chip_id)
 
 
@@ -70,7 +70,7 @@ async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, A
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Validate the API key and fetch device list."""
     web_session = async_get_clientsession(hass)
-    hub = TinxyLocalHub(TINXY_BACKEND)
+    hub = TinxyLocalHub(hass, TINXY_BACKEND)
 
     if not await hub.authenticate(data[CONF_API_KEY], web_session):
         raise InvalidAuth
@@ -187,7 +187,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     raise ValueError("Device not found")  # noqa: TRY301
 
                 web_session = async_get_clientsession(self.hass)
-                hub = TinxyLocalHub(user_input[CONF_HOST])
+                hub = TinxyLocalHub(self.hass, user_input[CONF_HOST])
                 validate_status = await hub.validate_ip(
                     web_session,
                     selected_device["uuidRef"]["uuid"],
