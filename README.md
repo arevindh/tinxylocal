@@ -13,7 +13,7 @@ This guide will help you set up the **tinxy-local** integration for Home Assista
 
 ### Step 1: Install the Tinxy-Local Integration
 
-1. Open the [tinxy-local GitHub repository](https://github.com/arevindh/tinxy-local](https://github.com/arevindh/tinxylocal).
+1. Open the [ tinxy-local GitHub repository ](https://github.com/arevindh/tinxylocal).
 2. **Add to HACS**:
    - Go to HACS in your Home Assistant UI.
    - Add the tinxy-local integration by entering the repository URL `https://github.com/arevindh/tinxylocal`.
