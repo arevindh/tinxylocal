@@ -34,7 +34,7 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
         self.hass = hass
         self.nodes = nodes  # Type-annotated as a list of dictionaries
         self.web_session = web_session
-        self.hubs = [TinxyLocalHub(node["ip_address"]) for node in nodes]
+        self.hubs = [TinxyLocalHub(hass, node["ip_address"]) for node in nodes]
         self.device_polling_intervals = {node["device_id"]: 5 for node in nodes}  # Default 5 seconds
         self.device_metadata = {}  # Type-annotated as a dictionary
 

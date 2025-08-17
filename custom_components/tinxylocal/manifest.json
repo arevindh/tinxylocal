@@ -1,20 +1,23 @@
 {
   "domain": "tinxylocal",
   "name": "Tinxy Local",
-  "codeowners": ["@arevindh"],
+  "codeowners": [
+    "@arevindh"
+  ],
   "config_flow": true,
+  "description": "Integration for Tinxy Local devices.",
   "dependencies": [],
-  "documentation": "https://www.home-assistant.io/integrations/tinxylocal",
+  "documentation": "https://github.com/arevindh/tinxylocal/blob/main/README.md",
+  "issue_tracker": "https://github.com/arevindh/tinxylocal/issues",
   "homekit": {},
   "iot_class": "local_polling",
-  "requirements": ["pyarmor==9.0.6"],
   "ssdp": [],
   "zeroconf": [
     {
-      "type": "_http._tcp.local.",
-      "name": "tinxy*"
+      "name": "tinxy*",
+      "type": "_http._tcp.local."
     }
   ],
-  "version": "1.1.0",
-  "homeassistant": ">=2024.12.0"
+  "version": "1.3.0",
+  "homeassistant": ">=2025.4.0"
 }
