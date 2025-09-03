@@ -199,14 +199,18 @@ class TinxyFan(CoordinatorEntity, FanEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the fan off."""
-        result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            action=0,
-        )
-        if result:
-            await asyncio.sleep(0.5)
-            await self.coordinator.async_request_refresh()
+        try:
+            result = await self.hub.queue_toggle_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                0,
+            )
+            if result:
+                await asyncio.sleep(0.5)
+                await self.coordinator.async_request_refresh()
+        except Exception as e:
+            _LOGGER.error("Failed to turn off fan %s: %s", self.node_id, e)
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the fan."""
@@ -231,8 +235,13 @@ class TinxyFan(CoordinatorEntity, FanEntity):
 
     async def _set_brightness(self, brightness: int) -> bool:
         """Set the brightness/speed of the fan using CLI."""
-        return await self.hub.tinxy_set_brightness(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            brightness=brightness,
-        )
+        try:
+            return await self.hub.queue_brightness_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                brightness,
+            )
+        except Exception as e:
+            _LOGGER.error("Failed to set brightness for fan %s: %s", self.node_id, e)
+            return False

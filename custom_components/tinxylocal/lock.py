@@ -151,11 +151,15 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         """Unlock the device."""
         # For pulse switches, we send a pulse (action=1) to unlock
         # The lock will automatically lock again after its configured timeout
-        result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            action=1,
-        )
-        if result:
-            await asyncio.sleep(0.5)
-            await self.coordinator.async_request_refresh()
+        try:
+            result = await self.hub.queue_toggle_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                1,
+            )
+            if result:
+                await asyncio.sleep(0.5)
+                await self.coordinator.async_request_refresh()
+        except Exception as e:
+            _LOGGER.error("Failed to unlock device %s: %s", self.node_id, e)

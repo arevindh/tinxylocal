@@ -1,18 +1,36 @@
 """Module for interacting with Tinxy devices locally."""
 
+import asyncio
 import logging
+import time
+from collections import deque
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 import aiohttp
-import asyncio 
+import platform
 
 from .const import TINXY_BACKEND
-
 from .tinxycloud import TinxyCloud, TinxyHostConfiguration
-import platform
 
 _LOGGER = logging.getLogger(__name__)
 
 HEADERS = {"Content-Type": "application/json"}
+
+
+@dataclass
+class QueuedCommand:
+    """Represents a queued command for a Tinxy device."""
+    command_type: str  # 'toggle' or 'brightness'
+    relay_number: int
+    action: Optional[int] = None
+    brightness: Optional[int] = None
+    future: Optional[asyncio.Future] = None
+    timestamp: float = 0.0
+    
+    def __post_init__(self):
+        if self.timestamp == 0.0:
+            self.timestamp = time.time()
 
 
 class TinxyConnectionException(Exception):
@@ -30,6 +48,17 @@ class TinxyLocalHub:
         self.hass = hass
         self.host = f"http://{host}"
         self.ip_address = host
+        
+        # Rate limiting configuration
+        self.command_timeout = 30.0  # seconds
+        self.queue_limit = 50  # max commands per device
+        self.rate_limit_delay = 1.0  # seconds between commands
+        
+        # Per-device command queues and workers
+        self.device_queues: Dict[str, deque] = {}
+        self.device_workers: Dict[str, asyncio.Task] = {}
+        self.device_last_command: Dict[str, float] = {}
+        self._shutdown = False
 
     async def authenticate(self, api_key: str, web_session) -> bool:
         """Authenticate with the host."""
@@ -317,3 +346,180 @@ class TinxyLocalHub:
         if device_type == "Lock":
             return "mdi:lock"
         return "mdi:toggle-switch"
+
+    async def queue_toggle_command(
+        self, device_id: str, mqttpass: str, relay_number: int, action: int
+    ) -> bool:
+        """Queue a toggle command with rate limiting."""
+        return await self._queue_command(
+            device_id, mqttpass, "toggle", relay_number, action=action
+        )
+
+    async def queue_brightness_command(
+        self, device_id: str, mqttpass: str, relay_number: int, brightness: int
+    ) -> bool:
+        """Queue a brightness command with rate limiting."""
+        return await self._queue_command(
+            device_id, mqttpass, "brightness", relay_number, brightness=brightness
+        )
+
+    async def _queue_command(
+        self,
+        device_id: str,
+        mqttpass: str,
+        command_type: str,
+        relay_number: int,
+        action: Optional[int] = None,
+        brightness: Optional[int] = None,
+        deduplicate: bool = True
+    ) -> bool:
+        """Queue a command for execution with rate limiting."""
+        if self._shutdown:
+            raise TinxyLocalException("Hub is shutting down")
+
+        # Get or create device queue
+        if device_id not in self.device_queues:
+            self.device_queues[device_id] = deque()
+            self.device_last_command[device_id] = 0.0
+            # Start worker for this device
+            self.device_workers[device_id] = asyncio.create_task(
+                self._device_worker(device_id, mqttpass)
+            )
+
+        queue = self.device_queues[device_id]
+        
+        # Check queue limit
+        if len(queue) >= self.queue_limit:
+            _LOGGER.warning(
+                "Command queue full for device %s (limit: %d)", 
+                device_id, self.queue_limit
+            )
+            raise TinxyLocalException("Command queue full")
+
+        # Deduplication: remove pending commands for the same relay
+        if deduplicate:
+            new_queue = deque()
+            removed_count = 0
+            
+            while queue:
+                cmd = queue.popleft()
+                if cmd.relay_number == relay_number:
+                    # Cancel the old command
+                    if cmd.future and not cmd.future.done():
+                        cmd.future.set_exception(
+                            TinxyLocalException("Superseded by newer command")
+                        )
+                    removed_count += 1
+                else:
+                    new_queue.append(cmd)
+            
+            # Replace the queue
+            self.device_queues[device_id] = new_queue
+            queue = new_queue
+            
+            if removed_count > 0:
+                _LOGGER.debug(
+                    "Removed %d pending commands for device %s relay %d", 
+                    removed_count, device_id, relay_number
+                )
+
+        # Create and queue the new command
+        future = asyncio.Future()
+        command = QueuedCommand(
+            command_type=command_type,
+            relay_number=relay_number,
+            action=action,
+            brightness=brightness,
+            future=future
+        )
+        
+        queue.append(command)
+        
+        # Log queue status
+        queue_size = len(queue)
+        if queue_size > 5:
+            _LOGGER.info(
+                "Command queue for device %s has %d pending commands", 
+                device_id, queue_size
+            )
+
+        # Wait for command completion
+        return await future
+
+    async def _device_worker(self, device_id: str, mqttpass: str) -> None:
+        """Background worker to process commands for a specific device."""
+        _LOGGER.debug("Started command worker for device %s", device_id)
+        
+        while not self._shutdown:
+            try:
+                queue = self.device_queues.get(device_id)
+                if not queue:
+                    await asyncio.sleep(0.1)
+                    continue
+
+                # Check rate limiting
+                last_command_time = self.device_last_command[device_id]
+                time_since_last = time.time() - last_command_time
+                
+                if time_since_last < self.rate_limit_delay:
+                    sleep_time = self.rate_limit_delay - time_since_last
+                    await asyncio.sleep(sleep_time)
+
+                # Get the next command
+                command = queue.popleft()
+                
+                # Check if command has timed out
+                if time.time() - command.timestamp > self.command_timeout:
+                    _LOGGER.warning(
+                        "Command timeout for device %s, relay %d", 
+                        device_id, command.relay_number
+                    )
+                    if command.future and not command.future.done():
+                        command.future.set_exception(
+                            TinxyLocalException("Command timeout")
+                        )
+                    continue
+
+                # Execute the command
+                try:
+                    if command.command_type == "toggle":
+                        result = await self.tinxy_toggle(
+                            mqttpass, command.relay_number, command.action
+                        )
+                    elif command.command_type == "brightness":
+                        result = await self.tinxy_set_brightness(
+                            mqttpass, command.relay_number, command.brightness
+                        )
+                    else:
+                        result = False
+                        _LOGGER.error("Unknown command type: %s", command.command_type)
+
+                    # Update last command time
+                    self.device_last_command[device_id] = time.time()
+
+                    # Complete the future
+                    if command.future and not command.future.done():
+                        command.future.set_result(result)
+
+                except Exception as e:
+                    _LOGGER.error(
+                        "Error executing command for device %s: %s", device_id, e
+                    )
+                    if command.future and not command.future.done():
+                        command.future.set_exception(e)
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                _LOGGER.error("Error in device worker for %s: %s", device_id, e)
+                await asyncio.sleep(1)
+
+        _LOGGER.debug("Stopped command worker for device %s", device_id)
+
+    async def shutdown(self) -> None:
+        """Shutdown the hub and stop all workers."""
+        self._shutdown = True
+        for worker in self.device_workers.values():
+            if not worker.done():
+                worker.cancel()
+        await asyncio.gather(*self.device_workers.values(), return_exceptions=True)

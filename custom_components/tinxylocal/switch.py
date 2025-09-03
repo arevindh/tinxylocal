@@ -158,22 +158,30 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
-        result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            action=1,
-        )
-        if result:
-            await asyncio.sleep(0.5)
-            await self.coordinator.async_request_refresh()
+        try:
+            result = await self.hub.queue_toggle_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                1,
+            )
+            if result:
+                await asyncio.sleep(0.5)
+                await self.coordinator.async_request_refresh()
+        except Exception as e:
+            _LOGGER.error("Failed to turn on switch %s: %s", self.node_id, e)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
-        result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            action=0,
-        )
-        if result:
-            await asyncio.sleep(0.5)
-            await self.coordinator.async_request_refresh()
+        try:
+            result = await self.hub.queue_toggle_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                0,
+            )
+            if result:
+                await asyncio.sleep(0.5)
+                await self.coordinator.async_request_refresh()
+        except Exception as e:
+            _LOGGER.error("Failed to turn off switch %s: %s", self.node_id, e)
