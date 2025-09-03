@@ -329,39 +329,31 @@ class TinxyLocalHub:
     @staticmethod
     def get_device_icon(device_type: str) -> str:
         """Generate an icon based on the device type."""
-        # Comprehensive icon mapping based on device types
+        # Icon mapping for device types available in Tinxy app
         icon_mapping = {
+            # Basic device types from Tinxy app
+            "Socket": "mdi:power-socket-eu",
+            "Switch": "mdi:toggle-switch", 
+            "Fan": "mdi:fan",
+            "Light": "mdi:lightbulb",
+            "Lock": "mdi:lock",
+            
+            # Common variations users might set
             "Heater": "mdi:radiator",
             "Tubelight": "mdi:lightbulb-fluorescent-tube",
             "LED Bulb": "mdi:lightbulb",
             "Dimmable Light": "mdi:lightbulb",
             "LED Dimmable Bulb": "mdi:lightbulb",
             "Music System": "mdi:music",
-            "Fan": "mdi:fan",
-            "Socket": "mdi:power-socket-eu",
             "TV": "mdi:television",
-            "Lock": "mdi:lock",
-            "EVA_BULB": "mdi:lightbulb",
-            "EVA_BULB_WW": "mdi:lightbulb",
-            "Light": "mdi:lightbulb",
-            "Switch": "mdi:toggle-switch",
-            # Additional device types
             "Geyser": "mdi:water-boiler",
             "AC": "mdi:air-conditioner",
-            "Cooler": "mdi:fan",
-            "Washing Machine": "mdi:washing-machine",
-            "Refrigerator": "mdi:fridge",
-            "Microwave": "mdi:microwave",
-            "Iron": "mdi:iron",
             "Motor": "mdi:engine",
             "Pump": "mdi:pump",
-            "CCTV": "mdi:cctv",
-            "Doorbell": "mdi:doorbell",
-            "Gate": "mdi:gate",
-            "Curtain": "mdi:curtains",
-            "Projector": "mdi:projector",
-            "Speaker": "mdi:speaker",
-            "Amplifier": "mdi:amplifier",
+            
+            # EVA device specific types
+            "EVA_BULB": "mdi:lightbulb",
+            "EVA_BULB_WW": "mdi:lightbulb",
         }
         
         # Check for exact match first
