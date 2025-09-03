@@ -29,6 +29,12 @@ async def async_setup_entry(
     )
     hubs = hass.data[DOMAIN][entry.entry_id]["hubs"]
 
+    # Skip creating switches if this is a lock device
+    device_data = entry.data["device"]
+    if device_data.get("typeId", {}).get("gtype") == "action.devices.types.LOCK":
+        async_add_entities([])
+        return
+
     switches = []
     device_types = entry.data["device"].get("deviceTypes", [])
     for node in coordinator.nodes:
@@ -41,6 +47,12 @@ async def async_setup_entry(
                 device_type = (
                     device_types[index] if index < len(device_types) else "Socket"
                 )
+                
+                # Skip fan devices as they will be handled by the fan platform
+                # Note: Dimmable lights are RF-based and don't support local control
+                if device_type.lower() == "fan":
+                    continue
+                    
                 switch = TinxySwitch(
                     coordinator=coordinator,
                     hub=hubs[0],

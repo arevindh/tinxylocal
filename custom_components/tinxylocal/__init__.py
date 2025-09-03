@@ -18,7 +18,7 @@ from .hub import TinxyLocalHub
 _LOGGER = logging.getLogger(__name__)
 
 # List the platforms that this integration will support.
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER]
+PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.FAN, Platform.LOCK]
 
 
 def set_executable_permissions(directory: str):
@@ -62,7 +62,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 for dev_name, dev_type in zip(
                     device_data["devices"], device_data["deviceTypes"], strict=False
                 )
-            ],
+            ] if device_data["devices"] else [
+                # For locks and other devices without individual relays, create a single device entry
+                {"name": device_data["name"], "type": "Lock"}
+            ] if device_data.get("typeId", {}).get("gtype") == "action.devices.types.LOCK" else [],
         }
     ]
 
