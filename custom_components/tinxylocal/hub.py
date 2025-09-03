@@ -329,55 +329,21 @@ class TinxyLocalHub:
     @staticmethod
     def get_device_icon(device_type: str) -> str:
         """Generate an icon based on the device type."""
-        # Icon mapping for device types available in Tinxy app
+        # Icon mapping matching the cloud version
         icon_mapping = {
-            # Basic device types from Tinxy app
-            "Socket": "mdi:power-socket-eu",
-            "Switch": "mdi:toggle-switch", 
-            "Fan": "mdi:fan",
-            "Light": "mdi:lightbulb",
-            "Lock": "mdi:lock",
-            
-            # Common variations users might set
             "Heater": "mdi:radiator",
             "Tubelight": "mdi:lightbulb-fluorescent-tube",
             "LED Bulb": "mdi:lightbulb",
             "Dimmable Light": "mdi:lightbulb",
             "LED Dimmable Bulb": "mdi:lightbulb",
             "Music System": "mdi:music",
+            "Fan": "mdi:fan",
+            "Socket": "mdi:power-socket-eu",
             "TV": "mdi:television",
-            "Geyser": "mdi:water-boiler",
-            "AC": "mdi:air-conditioner",
-            "Motor": "mdi:engine",
-            "Pump": "mdi:pump",
-            
-            # EVA device specific types
-            "EVA_BULB": "mdi:lightbulb",
-            "EVA_BULB_WW": "mdi:lightbulb",
+            "Lock": "mdi:lock",
         }
         
-        # Check for exact match first
-        if device_type in icon_mapping:
-            return icon_mapping[device_type]
-            
-        # Check for partial matches (case-insensitive)
-        device_type_lower = device_type.lower()
-        for key, icon in icon_mapping.items():
-            if key.lower() in device_type_lower or device_type_lower in key.lower():
-                return icon
-        
-        # Default fallback icons based on common patterns
-        if "light" in device_type_lower or "bulb" in device_type_lower or "lamp" in device_type_lower:
-            return "mdi:lightbulb"
-        elif "fan" in device_type_lower:
-            return "mdi:fan"
-        elif "lock" in device_type_lower or "door" in device_type_lower:
-            return "mdi:lock"
-        elif "switch" in device_type_lower or "socket" in device_type_lower:
-            return "mdi:power-socket-eu"
-        
-        # Final fallback
-        return "mdi:toggle-switch"
+        return icon_mapping.get(device_type, "mdi:toggle-switch")
 
     async def queue_toggle_command(
         self, device_id: str, mqttpass: str, relay_number: int, action: int
