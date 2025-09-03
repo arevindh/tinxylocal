@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.FAN, Platform.LOCK]
 
 
-def set_executable_permissions(directory: str):
+def _set_executable_permissions(directory: str):
     """Ensure all files in the directory are executable."""
     for root, _, files in os.walk(directory):
         for file in files:
@@ -40,7 +40,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     integration_path = hass.config.path("custom_components/tinxylocal/build")
     if os.path.exists(integration_path):
         _LOGGER.info("Setting executable permissions for files in %s", integration_path)
-        set_executable_permissions(integration_path)
+        await hass.async_add_executor_job(_set_executable_permissions, integration_path)
     else:
         _LOGGER.warning("Build directory does not exist: %s", integration_path)
 
