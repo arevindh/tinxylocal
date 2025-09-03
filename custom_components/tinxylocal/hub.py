@@ -329,22 +329,62 @@ class TinxyLocalHub:
     @staticmethod
     def get_device_icon(device_type: str) -> str:
         """Generate an icon based on the device type."""
-        if device_type == "Heater":
-            return "mdi:radiator"
-        if device_type == "Tubelight":
-            return "mdi:lightbulb-fluorescent-tube"
-        if device_type in ["LED Bulb", "Dimmable Light", "LED Dimmable Bulb"]:
+        # Comprehensive icon mapping based on device types
+        icon_mapping = {
+            "Heater": "mdi:radiator",
+            "Tubelight": "mdi:lightbulb-fluorescent-tube",
+            "LED Bulb": "mdi:lightbulb",
+            "Dimmable Light": "mdi:lightbulb",
+            "LED Dimmable Bulb": "mdi:lightbulb",
+            "Music System": "mdi:music",
+            "Fan": "mdi:fan",
+            "Socket": "mdi:power-socket-eu",
+            "TV": "mdi:television",
+            "Lock": "mdi:lock",
+            "EVA_BULB": "mdi:lightbulb",
+            "EVA_BULB_WW": "mdi:lightbulb",
+            "Light": "mdi:lightbulb",
+            "Switch": "mdi:toggle-switch",
+            # Additional device types
+            "Geyser": "mdi:water-boiler",
+            "AC": "mdi:air-conditioner",
+            "Cooler": "mdi:fan",
+            "Washing Machine": "mdi:washing-machine",
+            "Refrigerator": "mdi:fridge",
+            "Microwave": "mdi:microwave",
+            "Iron": "mdi:iron",
+            "Motor": "mdi:engine",
+            "Pump": "mdi:pump",
+            "CCTV": "mdi:cctv",
+            "Doorbell": "mdi:doorbell",
+            "Gate": "mdi:gate",
+            "Curtain": "mdi:curtains",
+            "Projector": "mdi:projector",
+            "Speaker": "mdi:speaker",
+            "Amplifier": "mdi:amplifier",
+        }
+        
+        # Check for exact match first
+        if device_type in icon_mapping:
+            return icon_mapping[device_type]
+            
+        # Check for partial matches (case-insensitive)
+        device_type_lower = device_type.lower()
+        for key, icon in icon_mapping.items():
+            if key.lower() in device_type_lower or device_type_lower in key.lower():
+                return icon
+        
+        # Default fallback icons based on common patterns
+        if "light" in device_type_lower or "bulb" in device_type_lower or "lamp" in device_type_lower:
             return "mdi:lightbulb"
-        if device_type == "Music System":
-            return "mdi:music"
-        if device_type == "Fan":
+        elif "fan" in device_type_lower:
             return "mdi:fan"
-        if device_type == "Socket":
-            return "mdi:power-socket-eu"
-        if device_type == "TV":
-            return "mdi:television"
-        if device_type == "Lock":
+        elif "lock" in device_type_lower or "door" in device_type_lower:
             return "mdi:lock"
+        elif "switch" in device_type_lower or "socket" in device_type_lower:
+            return "mdi:power-socket-eu"
+        
+        # Final fallback
         return "mdi:toggle-switch"
 
     async def queue_toggle_command(
