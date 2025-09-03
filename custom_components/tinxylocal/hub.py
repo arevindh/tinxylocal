@@ -178,6 +178,74 @@ class TinxyLocalHub:
             _LOGGER.error("Failed to execute toggle command: %s", e)
             return False
 
+    async def tinxy_set_brightness(
+        self, mqttpass: str, relay_number: int, brightness: int) -> bool:
+        """Set Tinxy device brightness using the CLI executable."""
+
+        INTEGRATION_PATH = self.hass.config.path(f"custom_components/tinxylocal/build")
+        # Determine the correct executable based on the system architecture
+        system_arch = platform.machine()
+        arch_table = {
+            "x86_64": ["x64", "x86_64", "amd64", "intel"],
+            "armv7l": ["armv7l"],
+            "armv6l": ["armv6l"],
+            "aarch64": ["aarch64", "arm64"],
+            "win": ["win"],
+        }
+
+        executable_path = None
+        for arch, aliases in arch_table.items():
+            if system_arch in aliases or system_arch.startswith(arch):
+                if arch == "x86_64":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_amd64"
+                elif arch == "armv7l":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv7"
+                elif arch == "armv6l":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv6"
+                elif arch == "aarch64":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_arm64"
+                elif arch == "win":
+                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_windows_amd64.exe"
+                break
+
+        if not executable_path:
+            _LOGGER.error("Unsupported system architecture: %s", system_arch)
+            return False
+
+        command = [
+            executable_path,
+            "-action", "1",  # Always turn on when setting brightness
+            "-ip", self.ip_address,
+            "-password", mqttpass,
+            "-relay", str(relay_number),
+            "-brightness", str(brightness),
+        ]
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await process.communicate()
+
+            if process.returncode == 0:
+                _LOGGER.info("Successfully set brightness %s for relay %s", brightness, relay_number)
+                return True
+            else:
+                _LOGGER.warning(
+                    "Brightness control failed for relay %s (brightness: %s). Stderr: %s. Falling back to toggle.",
+                    relay_number,
+                    brightness,
+                    stderr.decode().strip(),
+                )
+                # Fallback to simple toggle if brightness control is not supported
+                return await self.tinxy_toggle(mqttpass, relay_number, 1)
+        except Exception as e:
+            _LOGGER.error("Failed to execute brightness command: %s. Falling back to toggle.", e)
+            # Fallback to simple toggle if brightness control fails
+            return await self.tinxy_toggle(mqttpass, relay_number, 1)
+
     async def fetch_device_data(self, node, web_session):
         """Fetch and decode device data."""
         try:
@@ -211,8 +279,8 @@ class TinxyLocalHub:
 
         state_array = [
             {
-                "name": node["devices"][index]["name"],
-                "type": node["devices"][index]["type"],
+                "name": node["devices"][index]["name"] if index < len(node["devices"]) else f"Device {index + 1}",
+                "type": node["devices"][index]["type"] if index < len(node["devices"]) else "Unknown",
                 "status": "on" if status == "1" else "off",
             }
             for index, status in enumerate(data["state"])
@@ -223,7 +291,7 @@ class TinxyLocalHub:
                 data["bright"][i : i + 3] for i in range(0, len(data["bright"]), 3)
             ]
             for index, device in enumerate(state_array):
-                if device["type"] in ["light", "fan"]:
+                if device["type"].lower() in ["light", "fan"]:
                     device["brightness"] = int(brightness_array[index] or "000", 10)
 
         decoded_data["devices"] = state_array
