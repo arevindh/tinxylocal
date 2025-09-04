@@ -136,9 +136,29 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         return True
 
     @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra state attributes."""
+        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        attributes = {}
+        
+        if "door" in metadata:
+            attributes["door_status"] = metadata["door"]
+            
+        return attributes if attributes else None
+
+    @property
     def icon(self) -> str:
         """Return the icon of the lock."""
-        return "mdi:lock" if self.is_locked else "mdi:lock-open"
+        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        door_status = metadata.get("door")
+        
+        if door_status == "OPEN":
+            return "mdi:door-open"
+        elif door_status == "CLOSED":
+            return "mdi:lock" if self.is_locked else "mdi:lock-open"
+        else:
+            # Fallback to default behavior if door status is unknown
+            return "mdi:lock" if self.is_locked else "mdi:lock-open"
 
     async def async_lock(self, **kwargs: Any) -> None:
         """Lock the device."""

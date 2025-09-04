@@ -304,6 +304,7 @@ class TinxyLocalHub:
             "ssid": data["ssid"],
             "firmware": data["firmware"],
             "model": data["model"],
+            "door": data.get("door"),
             "devices": [],
         }
 
