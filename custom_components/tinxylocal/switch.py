@@ -36,32 +36,49 @@ async def async_setup_entry(
         return
 
     switches = []
-    device_types = entry.data["device"].get("deviceTypes", [])
+    device_data = entry.data["device"]
+    device_types = device_data.get("deviceTypes", [])
+    
+    # Get features from typeId for more reliable device type detection
+    type_id = device_data.get("typeId", {})
+    features = type_id.get("features", [])
+    
     for node in coordinator.nodes:
         device_name = node["name"]
 
         for index, device in enumerate(node["devices"]):
-            if device["type"].lower():
-                relay_number = index + 1
-                entity_name = f"{device_name} {device['name']}"
-                device_type = (
-                    device_types[index] if index < len(device_types) else "Socket"
-                )
+            # Ensure device is a string (device name), not a dict object
+            if isinstance(device, dict):
+                device_name_str = device.get("name", f"Device {index + 1}")
+            else:
+                device_name_str = str(device)
+            
+            # Use features array first (most reliable), then fall back to deviceTypes
+            if index < len(features) and "FAN" in features[index]:
+                device_type = "Fan"
+            elif index < len(device_types):
+                device_type = device_types[index]
+            else:
+                device_type = "Socket"
+            
+            # Skip fan devices ONLY if they actually have fan hardware capabilities
+            # Check features array, not deviceTypes (which is user configuration)
+            has_fan_feature = index < len(features) and "FAN" in features[index]
+            if has_fan_feature:
+                continue
                 
-                # Skip fan devices as they will be handled by the fan platform
-                # Note: Dimmable lights are RF-based and don't support local control
-                if device_type.lower() == "fan":
-                    continue
-                    
-                switch = TinxySwitch(
-                    coordinator=coordinator,
-                    hub=hubs[0],
-                    node_id=node["device_id"],
-                    relay_number=relay_number,
-                    name=entity_name,
-                    device_type=device_type,
-                )
-                switches.append(switch)
+            relay_number = index + 1
+            entity_name = f"{device_name} {device_name_str}"
+            
+            switch = TinxySwitch(
+                coordinator=coordinator,
+                hub=hubs[0],
+                node_id=node["device_id"],
+                relay_number=relay_number,
+                name=entity_name,
+                device_type=device_type,
+            )
+            switches.append(switch)
 
     async_add_entities(switches)
 

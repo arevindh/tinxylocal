@@ -265,6 +265,7 @@ class TinxyLocalHub:
     @staticmethod
     def _decode_device_data(data, node):
         """Decode the device data."""
+        
         decoded_data = {
             "rssi": data["rssi"],
             "ip": data["ip"],
@@ -277,22 +278,35 @@ class TinxyLocalHub:
             "devices": [],
         }
 
-        state_array = [
-            {
-                "name": node["devices"][index]["name"] if index < len(node["devices"]) else f"Device {index + 1}",
-                "type": node["devices"][index]["type"] if index < len(node["devices"]) else "Unknown",
+        state_array = []
+        for index, status in enumerate(data["state"]):
+            device_info = node["devices"][index] if index < len(node["devices"]) else {"name": f"Device {index + 1}", "type": "Socket"}
+            
+            # Handle both dictionary and string formats for device info
+            if isinstance(device_info, dict):
+                device_name = device_info.get("name", f"Device {index + 1}")
+                device_type = device_info.get("type", "Socket")
+            else:
+                device_name = device_info
+                device_type = node["deviceTypes"][index] if index < len(node.get("deviceTypes", [])) else "Socket"
+            
+            state_array.append({
+                "name": device_name,
+                "type": device_type,
                 "status": "on" if status == "1" else "off",
-            }
-            for index, status in enumerate(data["state"])
-        ]
+            })
 
         if "bright" in data:
             brightness_array = [
                 data["bright"][i : i + 3] for i in range(0, len(data["bright"]), 3)
             ]
+            
             for index, device in enumerate(state_array):
-                if device["type"].lower() in ["light", "fan"]:
-                    device["brightness"] = int(brightness_array[index] or "000", 10)
+                device_type = device["type"].lower()
+                
+                if device_type in ["light", "fan"]:
+                    brightness_value = int(brightness_array[index] or "000", 10)
+                    device["brightness"] = brightness_value
 
         decoded_data["devices"] = state_array
         return decoded_data
