@@ -120,25 +120,68 @@ class TinxyLock(CoordinatorEntity, LockEntity):
             _LOGGER.debug("Node data is missing for node %s", self.node_id)
             return True  # Default to locked when no data
 
-        # For locks without individual devices, check if there's any device data
-        device_data = node_data.get("devices", [])
-        if not device_data:
-            # No device data available, assume locked
-            return True
-            
-        if len(device_data) >= self.relay_number:
-            status = device_data[self.relay_number - 1].get("status", "off")
-            # For pulse switches: "on" might indicate recently activated (unlocked)
-            # "off" indicates idle state (locked)
-            return status == "off"
+        # Check door status first
+        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        door_status = metadata.get("door")
+        
+        if door_status == "OPEN":
+            # If door is open, consider the lock as unlocked
+            return False
+        elif door_status == "CLOSED":
+            # If door is closed, check the device status
+            device_data = node_data.get("devices", [])
+            if not device_data:
+                # No device data available, assume locked
+                return True
+                
+            if len(device_data) >= self.relay_number:
+                status = device_data[self.relay_number - 1].get("status", "off")
+                # For pulse switches: "on" might indicate recently activated (unlocked)
+                # "off" indicates idle state (locked)
+                return status == "off"
 
-        # Default to locked if we can't determine state
-        return True
+            # Default to locked if we can't determine state
+            return True
+        else:
+            # Door status unknown, fall back to device status logic
+            device_data = node_data.get("devices", [])
+            if not device_data:
+                # No device data available, assume locked
+                return True
+                
+            if len(device_data) >= self.relay_number:
+                status = device_data[self.relay_number - 1].get("status", "off")
+                # For pulse switches: "on" might indicate recently activated (unlocked)
+                # "off" indicates idle state (locked)
+                return status == "off"
+
+            # Default to locked if we can't determine state
+            return True
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return extra state attributes."""
+        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        attributes = {}
+        
+        if "door" in metadata:
+            attributes["door_status"] = metadata["door"]
+            
+        return attributes if attributes else None
 
     @property
     def icon(self) -> str:
         """Return the icon of the lock."""
-        return "mdi:lock" if self.is_locked else "mdi:lock-open"
+        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        door_status = metadata.get("door")
+        
+        if door_status == "OPEN":
+            return "mdi:door-open"
+        elif door_status == "CLOSED":
+            return "mdi:lock" if self.is_locked else "mdi:lock-open"
+        else:
+            # Fallback to default behavior if door status is unknown
+            return "mdi:lock" if self.is_locked else "mdi:lock-open"
 
     async def async_lock(self, **kwargs: Any) -> None:
         """Lock the device."""
@@ -151,11 +194,15 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         """Unlock the device."""
         # For pulse switches, we send a pulse (action=1) to unlock
         # The lock will automatically lock again after its configured timeout
-        result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            action=1,
-        )
-        if result:
-            await asyncio.sleep(0.5)
-            await self.coordinator.async_request_refresh()
+        try:
+            result = await self.hub.queue_toggle_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                1,
+            )
+            if result:
+                await asyncio.sleep(0.5)
+                await self.coordinator.async_request_refresh()
+        except Exception as e:
+            _LOGGER.error("Failed to unlock device %s: %s", self.node_id, e)

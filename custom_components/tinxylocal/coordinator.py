@@ -54,6 +54,7 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
                         "ssid": device_data.get("ssid"),
                         "ip": device_data.get("ip"),
                         "version": device_data.get("version"),
+                        "door": device_data.get("door"),
                     }
             except TinxyConnectionException as conn_err:
                 _LOGGER.error(

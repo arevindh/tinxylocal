@@ -37,20 +37,43 @@ async def async_setup_entry(
         return
 
     fans = []
-    device_types = entry.data["device"].get("deviceTypes", [])
+    device_data = entry.data["device"]
+    device_types = device_data.get("deviceTypes", [])
+    
+    # Get features from typeId for more reliable device type detection
+    type_id = device_data.get("typeId", {})
+    features = type_id.get("features", [])
+    
     for node in coordinator.nodes:
-        device_name = node["name"]
+        node_name = node["name"]
+        device_names = node.get("devices", [])
+        
+        # Handle empty devices array
+        if not device_names:
+            num_relays = type_id.get("numberOfRelays", 1)
+            device_names = [device_types[i] if i < len(device_types) else f"Device {i+1}" for i in range(num_relays)]
 
-        for index, device in enumerate(node["devices"]):
-            device_type = (
-                device_types[index] if index < len(device_types) else "Socket"
-            )
+        for index, device_name in enumerate(device_names):
+            # Ensure device_name is a string, not a dict object
+            if isinstance(device_name, dict):
+                device_name_str = device_name.get("name", f"Device {index + 1}")
+            else:
+                device_name_str = str(device_name)
+                
+            # Use features array first (most reliable), then fall back to deviceTypes
+            if index < len(features) and "FAN" in features[index]:
+                device_type = "Fan"
+            elif index < len(device_types):
+                device_type = device_types[index]
+            else:
+                device_type = "Socket"
             
-            # Only create fan entities for fan devices that support local control
-            # RF-based devices don't support local brightness control
-            if device_type.lower() == "fan" and device["type"].lower():
+            # Only create fan entities for devices that actually have fan capabilities
+            # IMPORTANT: Only trust the features array for hardware capabilities
+            has_fan_feature = index < len(features) and "FAN" in features[index]
+            if has_fan_feature:
                 relay_number = index + 1
-                entity_name = f"{device_name} {device['name']}"
+                entity_name = f"{node_name} {device_name_str}"
                 fan = TinxyFan(
                     coordinator=coordinator,
                     hub=hubs[0],
@@ -155,9 +178,6 @@ class TinxyFan(CoordinatorEntity, FanEntity):
     @property
     def percentage(self) -> int | None:
         """Return the current speed percentage."""
-        if not self.is_on:
-            return 0
-
         if self.coordinator.data is None:
             return 0
 
@@ -170,8 +190,10 @@ class TinxyFan(CoordinatorEntity, FanEntity):
         if len(device_data) >= self.relay_number:
             device = device_data[self.relay_number - 1]
             brightness = device.get("brightness", 0)
-            # Return the actual brightness value since it's already a percentage
-            return brightness
+            is_on = device.get("status") == "on"
+            
+            # If fan is off, return 0, otherwise return the brightness value
+            return brightness if is_on else 0
 
         return 0
 
@@ -188,25 +210,37 @@ class TinxyFan(CoordinatorEntity, FanEntity):
     ) -> None:
         """Turn the fan on."""
         if percentage is None:
-            # If no percentage specified, turn on at current speed or medium speed
-            current_percentage = self.percentage
-            if current_percentage and current_percentage > 0:
-                percentage = current_percentage
-            else:
-                percentage = 50  # Default to medium speed
+            # If no percentage specified, try to use the last known brightness value
+            if self.coordinator.data is not None:
+                node_data = self.coordinator.data.get(self.node_id, {})
+                if node_data:
+                    device_data = node_data.get("devices", [])
+                    if len(device_data) >= self.relay_number:
+                        device = device_data[self.relay_number - 1]
+                        stored_brightness = device.get("brightness", 0)
+                        if stored_brightness > 0:
+                            percentage = stored_brightness
+            
+            # If no stored brightness or it's 0, use medium speed as default
+            if percentage is None or percentage == 0:
+                percentage = 66  # Default to medium speed (66%)
 
         await self.async_set_percentage(percentage)
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the fan off."""
-        result = await self.hub.tinxy_toggle(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            action=0,
-        )
-        if result:
-            await asyncio.sleep(0.5)
-            await self.coordinator.async_request_refresh()
+        try:
+            result = await self.hub.queue_toggle_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                0,
+            )
+            if result:
+                await asyncio.sleep(0.5)
+                await self.coordinator.async_request_refresh()
+        except Exception as e:
+            _LOGGER.error("Failed to turn off fan %s: %s", self.node_id, e)
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the fan."""
@@ -231,8 +265,13 @@ class TinxyFan(CoordinatorEntity, FanEntity):
 
     async def _set_brightness(self, brightness: int) -> bool:
         """Set the brightness/speed of the fan using CLI."""
-        return await self.hub.tinxy_set_brightness(
-            mqttpass=self.coordinator.nodes[0]["mqtt_password"],
-            relay_number=self.relay_number,
-            brightness=brightness,
-        )
+        try:
+            return await self.hub.queue_brightness_command(
+                self.node_id,
+                self.coordinator.nodes[0]["mqtt_password"],
+                self.relay_number,
+                brightness,
+            )
+        except Exception as e:
+            _LOGGER.error("Failed to set brightness for fan %s: %s", self.node_id, e)
+            return False
