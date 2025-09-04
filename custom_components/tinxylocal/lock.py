@@ -120,20 +120,43 @@ class TinxyLock(CoordinatorEntity, LockEntity):
             _LOGGER.debug("Node data is missing for node %s", self.node_id)
             return True  # Default to locked when no data
 
-        # For locks without individual devices, check if there's any device data
-        device_data = node_data.get("devices", [])
-        if not device_data:
-            # No device data available, assume locked
-            return True
-            
-        if len(device_data) >= self.relay_number:
-            status = device_data[self.relay_number - 1].get("status", "off")
-            # For pulse switches: "on" might indicate recently activated (unlocked)
-            # "off" indicates idle state (locked)
-            return status == "off"
+        # Check door status first
+        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        door_status = metadata.get("door")
+        
+        if door_status == "OPEN":
+            # If door is open, consider the lock as unlocked
+            return False
+        elif door_status == "CLOSED":
+            # If door is closed, check the device status
+            device_data = node_data.get("devices", [])
+            if not device_data:
+                # No device data available, assume locked
+                return True
+                
+            if len(device_data) >= self.relay_number:
+                status = device_data[self.relay_number - 1].get("status", "off")
+                # For pulse switches: "on" might indicate recently activated (unlocked)
+                # "off" indicates idle state (locked)
+                return status == "off"
 
-        # Default to locked if we can't determine state
-        return True
+            # Default to locked if we can't determine state
+            return True
+        else:
+            # Door status unknown, fall back to device status logic
+            device_data = node_data.get("devices", [])
+            if not device_data:
+                # No device data available, assume locked
+                return True
+                
+            if len(device_data) >= self.relay_number:
+                status = device_data[self.relay_number - 1].get("status", "off")
+                # For pulse switches: "on" might indicate recently activated (unlocked)
+                # "off" indicates idle state (locked)
+                return status == "off"
+
+            # Default to locked if we can't determine state
+            return True
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
