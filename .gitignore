@@ -2,3 +2,4 @@ safe/*
 build.md
 .env
 venv
+__pycache__/
