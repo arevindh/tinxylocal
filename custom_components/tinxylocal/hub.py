@@ -120,7 +120,7 @@ class TinxyLocalHub:
                 url=url,
                 json=payload if method == "POST" else None,
                 headers=HEADERS,
-                timeout=2,
+                timeout=5,
             ) as response:
                 if response.status == 200:
                     return await response.json(content_type=None)
