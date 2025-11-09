@@ -11,14 +11,14 @@ from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_DEVICE, CONF_MQTT_PASS, DOMAIN
+from .const import CONF_DEVICE, CONF_MQTT_PASS, CONF_POLLING_INTERVAL, CONF_REQUEST_TIMEOUT, DEFAULT_POLLING_INTERVAL, DEFAULT_REQUEST_TIMEOUT, DOMAIN
 from .coordinator import TinxyUpdateCoordinator
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 
 # List the platforms that this integration will support.
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.NUMBER, Platform.FAN, Platform.LOCK]
+PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.FAN, Platform.LOCK]
 
 
 def _set_executable_permissions(directory: str):
@@ -46,6 +46,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     web_session = async_get_clientsession(hass)
 
+    # Get request timeout from options or use default
+    request_timeout = entry.options.get(CONF_REQUEST_TIMEOUT, DEFAULT_REQUEST_TIMEOUT)
+    
+    # Get polling interval from options or use default
+    polling_interval = entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL)
+
     # Extract device configurations
     device_data = entry.data[CONF_DEVICE]
 
@@ -70,10 +76,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ]
 
     # Initialize TinxyLocalHub instances for each node
-    hubs = [TinxyLocalHub(hass, node["ip_address"]) for node in nodes]
+    hubs = [TinxyLocalHub(hass, node["ip_address"], request_timeout) for node in nodes]
 
     # Initialize the coordinator with the list of nodes and web session
-    coordinator = TinxyUpdateCoordinator(hass, nodes, web_session)
+    coordinator = TinxyUpdateCoordinator(hass, nodes, web_session, polling_interval)
 
     # Store the coordinator and hubs in Home Assistant's data store
     hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator, "hubs": hubs}

@@ -22,20 +22,19 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
     nodes: list[dict[str, Any]]
 
     def __init__(
-        self, hass: HomeAssistant, nodes: list[dict[str, Any]], web_session
+        self, hass: HomeAssistant, nodes: list[dict[str, Any]], web_session, default_polling_interval: int = 5
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
             name="Tinxy Nodes",
-            update_interval=timedelta(seconds=5),  # Default fallback interval
+            update_interval=timedelta(seconds=default_polling_interval),
         )
         self.hass = hass
         self.nodes = nodes  # Type-annotated as a list of dictionaries
         self.web_session = web_session
         self.hubs = [TinxyLocalHub(hass, node["ip_address"]) for node in nodes]
-        self.device_polling_intervals = {node["device_id"]: 5 for node in nodes}  # Default 5 seconds
         self.device_metadata = {}  # Type-annotated as a dictionary
 
     async def _async_update_data(self):
@@ -74,14 +73,6 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
         # Call the device registration method after the initial data fetch
         await self._register_devices()
         return status_list
-
-    def set_polling_interval(self, device_id: str, interval: int) -> None:
-        """Set the polling interval for a specific device."""
-        _LOGGER.debug("Setting polling interval for device %s to %d seconds", device_id, interval)
-        self.device_polling_intervals[device_id] = interval
-        self.update_interval = timedelta(
-            seconds=min(self.device_polling_intervals.values(), default=5)
-        )
 
     async def _register_devices(self):
         """Register devices in the Home Assistant device registry after data is loaded."""
