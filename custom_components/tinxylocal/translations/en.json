@@ -1,0 +1,54 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Device",
+        "data": {
+          "host": "Host",
+          "mqtt_pass": "MQTT Password",
+          "device_id": "Device ID",
+          "api_key": "API Key"
+        }
+      },
+      "choose_token": {
+        "title": "API Token Options",
+        "description": "Choose how you would like to proceed with the API token.",
+        "data": {
+          "token_choice": "Token Option"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tinxy Local Options",
+        "description": "Configure advanced settings for Tinxy Local integration.",
+        "data": {
+          "api_key": "API Key",
+          "request_timeout": "Request Timeout",
+          "polling_interval": "Polling Interval"
+        },
+        "data_description": {
+          "api_key": "Leave unchanged if not updating",
+          "request_timeout": "Timeout in seconds for HTTP requests to Tinxy devices. Default is 3 seconds.",
+          "polling_interval": "How often to poll devices for status updates in seconds. Default is 6 seconds. Must be ≥ request timeout."
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid authentication",
+      "cannot_connect": "Failed to connect",
+      "unknown": "Unexpected error",
+      "polling_less_than_timeout": "Polling interval must be greater than or equal to request timeout"
+    }
+  }
+}

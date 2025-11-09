@@ -37,9 +37,9 @@
         "title": "Tinxy Local Options",
         "description": "Configure advanced settings for Tinxy Local integration.",
         "data": {
-          "api_key": "API Key (leave unchanged if not updating)",
-          "request_timeout": "HTTP Request Timeout (seconds)",
-          "polling_interval": "Polling Interval (seconds)"
+          "api_key": "API Key",
+          "request_timeout": "Request Timeout",
+          "polling_interval": "Polling Interval"
         },
         "data_description": {
           "request_timeout": "Timeout in seconds for HTTP requests to Tinxy devices. Default is 3 seconds. Increase if you have slow network connections.",
