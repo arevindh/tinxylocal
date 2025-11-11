@@ -326,10 +326,12 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
                 options=updated_options,
             )
             
-            # Reload the integration to apply the new timeout
-            await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+            # Schedule reload in background so form closes properly first
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(self.config_entry.entry_id)
+            )
             
-            return self.async_create_entry(title="", data={})
+            return self.async_create_entry(title="", data=updated_options)
 
         # Show form for updating settings
         return self.async_show_form(
@@ -339,11 +341,15 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
     
     def _get_options_schema(self) -> vol.Schema:
         """Get the options schema with current values as defaults."""
-        current_timeout = self.config_entry.options.get(
+        # Get fresh config entry to avoid stale data
+        fresh_entry = self.hass.config_entries.async_get_entry(self.config_entry.entry_id)
+        options = fresh_entry.options if fresh_entry else self.config_entry.options
+        
+        current_timeout = options.get(
             CONF_REQUEST_TIMEOUT,
             DEFAULT_REQUEST_TIMEOUT
         )
-        current_polling = self.config_entry.options.get(
+        current_polling = options.get(
             CONF_POLLING_INTERVAL,
             DEFAULT_POLLING_INTERVAL
         )
