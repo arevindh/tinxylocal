@@ -18,6 +18,6 @@
       "type": "_http._tcp.local."
     }
   ],
-  "version": "2.5.0",
+  "version": "2.6.0",
   "homeassistant": ">=2025.4.0"
 }
