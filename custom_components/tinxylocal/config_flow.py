@@ -288,6 +288,10 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
             updated_data = {**self.config_entry.data}
             updated_options = {**self.config_entry.options}  # Preserve existing options
             
+            # Update host IP if changed
+            if CONF_HOST in user_input and user_input[CONF_HOST] != self.config_entry.data.get(CONF_HOST):
+                updated_data[CONF_HOST] = user_input[CONF_HOST]
+            
             # Update API key if changed
             if CONF_API_KEY in user_input and user_input[CONF_API_KEY] != self.config_entry.data.get(CONF_API_KEY):
                 try:
@@ -354,9 +358,11 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
             DEFAULT_POLLING_INTERVAL
         )
         current_api_key = self.config_entry.data.get(CONF_API_KEY, "")
+        current_host = self.config_entry.data.get(CONF_HOST, "")
         
         return vol.Schema(
             {
+                vol.Optional(CONF_HOST, default=current_host): str,
                 vol.Optional(CONF_API_KEY, default=current_api_key): selector.TextSelector(
                     selector.TextSelectorConfig(
                         type=selector.TextSelectorType.PASSWORD,

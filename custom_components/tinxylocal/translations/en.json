@@ -33,11 +33,13 @@
         "title": "Tinxy Local Options",
         "description": "Configure advanced settings for Tinxy Local integration.",
         "data": {
+          "host": "Device IP Address",
           "api_key": "API Key",
           "request_timeout": "Request Timeout",
           "polling_interval": "Polling Interval"
         },
         "data_description": {
+          "host": "Local IP address of the Tinxy device",
           "api_key": "Leave unchanged if not updating",
           "request_timeout": "Timeout in seconds for HTTP requests to Tinxy devices. Default is 3 seconds.",
           "polling_interval": "How often to poll devices for status updates in seconds. Default is 6 seconds. Must be ≥ request timeout."
