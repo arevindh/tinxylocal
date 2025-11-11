@@ -286,7 +286,7 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
             
             # Update entry with the new settings
             updated_data = {**self.config_entry.data}
-            updated_options = {}
+            updated_options = {**self.config_entry.options}  # Preserve existing options
             
             # Update API key if changed
             if CONF_API_KEY in user_input and user_input[CONF_API_KEY] != self.config_entry.data.get(CONF_API_KEY):
@@ -313,13 +313,11 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
                         errors={"base": "unknown"},
                     )
             
-            # Update request timeout if provided
-            if CONF_REQUEST_TIMEOUT in user_input:
-                updated_options[CONF_REQUEST_TIMEOUT] = user_input[CONF_REQUEST_TIMEOUT]
+            # Update request timeout
+            updated_options[CONF_REQUEST_TIMEOUT] = timeout
             
-            # Update polling interval if provided
-            if CONF_POLLING_INTERVAL in user_input:
-                updated_options[CONF_POLLING_INTERVAL] = user_input[CONF_POLLING_INTERVAL]
+            # Update polling interval
+            updated_options[CONF_POLLING_INTERVAL] = polling
             
             # Update the config entry
             self.hass.config_entries.async_update_entry(
