@@ -101,8 +101,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def async_get_options_flow(
         config_entry: config_entries.ConfigEntry,
     ) -> TinxyLocalOptionsFlowHandler:
-        """Get the options flow for this handler."""
-        return TinxyLocalOptionsFlowHandler(config_entry)
+        """Get the options flow for this handler.
+        """
+        return TinxyLocalOptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -261,9 +262,9 @@ class InvalidAuth(HomeAssistantError):
 class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle Tinxy Local options to change API token."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        return None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
