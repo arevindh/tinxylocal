@@ -12,8 +12,9 @@ from homeassistant.const import CONF_API_KEY, CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import selector
 
-from .const import CONF_DEVICE, CONF_DEVICE_ID, CONF_MQTT_PASS, DOMAIN, TINXY_BACKEND
+from .const import CONF_DEVICE, CONF_DEVICE_ID, CONF_MQTT_PASS, CONF_POLLING_INTERVAL, CONF_REQUEST_TIMEOUT, DEFAULT_POLLING_INTERVAL, DEFAULT_REQUEST_TIMEOUT, DOMAIN, TINXY_BACKEND
 from .hub import TinxyLocalHub
 from .tinxycloud import TinxyCloud, TinxyHostConfiguration
 
@@ -95,6 +96,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.api_token = None
         self.cloud_devices = {}
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> TinxyLocalOptionsFlowHandler:
+        """Get the options flow for this handler.
+        """
+        return TinxyLocalOptionsFlowHandler()
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -253,46 +262,135 @@ class InvalidAuth(HomeAssistantError):
 class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle Tinxy Local options to change API token."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
+    def __init__(self) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        return None
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Manage the options to update API token."""
+        """Manage the options to update API token and request timeout."""
+        errors: dict[str, str] = {}
+        
         if user_input is not None:
-            # Validate the new token if provided
-            try:
-                await validate_input(self.hass, user_input)
-                # Update entry with the new API key
-                self.hass.config_entries.async_update_entry(
-                    self.config_entry,
-                    data={
-                        **self.config_entry.data,
-                        CONF_API_KEY: user_input[CONF_API_KEY],
-                    },
-                )
-                return self.async_create_entry(title="", data={})
-            except InvalidAuth:
+            # Validate polling interval vs timeout
+            timeout = user_input.get(CONF_REQUEST_TIMEOUT, self.config_entry.options.get(CONF_REQUEST_TIMEOUT, DEFAULT_REQUEST_TIMEOUT))
+            polling = user_input.get(CONF_POLLING_INTERVAL, self.config_entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL))
+            
+            if polling < timeout:
+                errors["polling_interval"] = "polling_less_than_timeout"
                 return self.async_show_form(
                     step_id="init",
-                    data_schema=STEP_USER_DATA_SCHEMA,
-                    errors={"base": "invalid_auth"},
+                    data_schema=self._get_options_schema(),
+                    errors=errors,
                 )
-            except CannotConnect:
-                return self.async_show_form(
-                    step_id="init",
-                    data_schema=STEP_USER_DATA_SCHEMA,
-                    errors={"base": "cannot_connect"},
-                )
-            except Exception:
-                _LOGGER.exception("Unexpected exception during token update")
-                return self.async_show_form(
-                    step_id="init",
-                    data_schema=STEP_USER_DATA_SCHEMA,
-                    errors={"base": "unknown"},
-                )
+            
+            # Update entry with the new settings
+            updated_data = {**self.config_entry.data}
+            updated_options = {**self.config_entry.options}  # Preserve existing options
+            
+            # Update host IP if changed
+            if CONF_HOST in user_input and user_input[CONF_HOST] != self.config_entry.data.get(CONF_HOST):
+                updated_data[CONF_HOST] = user_input[CONF_HOST]
+            
+            # Update API key if changed
+            if CONF_API_KEY in user_input and user_input[CONF_API_KEY] != self.config_entry.data.get(CONF_API_KEY):
+                try:
+                    await validate_input(self.hass, user_input)
+                    updated_data[CONF_API_KEY] = user_input[CONF_API_KEY]
+                except InvalidAuth:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=self._get_options_schema(),
+                        errors={"base": "invalid_auth"},
+                    )
+                except CannotConnect:
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=self._get_options_schema(),
+                        errors={"base": "cannot_connect"},
+                    )
+                except Exception:
+                    _LOGGER.exception("Unexpected exception during token update")
+                    return self.async_show_form(
+                        step_id="init",
+                        data_schema=self._get_options_schema(),
+                        errors={"base": "unknown"},
+                    )
+            
+            # Update request timeout
+            updated_options[CONF_REQUEST_TIMEOUT] = timeout
+            
+            # Update polling interval
+            updated_options[CONF_POLLING_INTERVAL] = polling
+            
+            # Update the config entry
+            self.hass.config_entries.async_update_entry(
+                self.config_entry,
+                data=updated_data,
+                options=updated_options,
+            )
+            
+            # Schedule reload in background so form closes properly first
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(self.config_entry.entry_id)
+            )
+            
+            return self.async_create_entry(title="", data=updated_options)
 
-        # Show form for updating API token
-        return self.async_show_form(step_id="init", data_schema=STEP_USER_DATA_SCHEMA)
+        # Show form for updating settings
+        return self.async_show_form(
+            step_id="init", 
+            data_schema=self._get_options_schema()
+        )
+    
+    def _get_options_schema(self) -> vol.Schema:
+        """Get the options schema with current values as defaults."""
+        # Get fresh config entry to avoid stale data
+        fresh_entry = self.hass.config_entries.async_get_entry(self.config_entry.entry_id)
+        options = fresh_entry.options if fresh_entry else self.config_entry.options
+        
+        current_timeout = options.get(
+            CONF_REQUEST_TIMEOUT,
+            DEFAULT_REQUEST_TIMEOUT
+        )
+        current_polling = options.get(
+            CONF_POLLING_INTERVAL,
+            DEFAULT_POLLING_INTERVAL
+        )
+        current_api_key = self.config_entry.data.get(CONF_API_KEY, "")
+        current_host = self.config_entry.data.get(CONF_HOST, "")
+        
+        return vol.Schema(
+            {
+                vol.Optional(CONF_HOST, default=current_host): str,
+                vol.Optional(CONF_API_KEY, default=current_api_key): selector.TextSelector(
+                    selector.TextSelectorConfig(
+                        type=selector.TextSelectorType.PASSWORD,
+                        autocomplete="off",
+                    )
+                ),
+                vol.Optional(
+                    CONF_REQUEST_TIMEOUT, 
+                    default=current_timeout
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=1,
+                        max=60,
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="seconds",
+                    )
+                ),
+                vol.Optional(
+                    CONF_POLLING_INTERVAL,
+                    default=current_polling
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=3,
+                        max=600,
+                        mode=selector.NumberSelectorMode.BOX,
+                        unit_of_measurement="seconds",
+                    )
+                ),
+            }
+        )

@@ -30,5 +30,30 @@
       "token_choice_existing": "Use existing API token",
       "token_choice_new": "Enter a new API token"
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Tinxy Local Options",
+        "description": "Configure advanced settings for Tinxy Local integration.",
+        "data": {
+          "host": "Device IP Address",
+          "api_key": "API Key",
+          "request_timeout": "Request Timeout",
+          "polling_interval": "Polling Interval"
+        },
+        "data_description": {
+          "host": "Local IP address of the Tinxy device",
+          "request_timeout": "Timeout in seconds for HTTP requests to Tinxy devices. Default is 3 seconds. Increase if you have slow network connections.",
+          "polling_interval": "How often to poll devices for status updates. Default is 6 seconds. Must be greater than or equal to request timeout. Lower values provide faster updates but increase network traffic."
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "unknown": "[%key:common::config_flow::error::unknown%]",
+      "polling_less_than_timeout": "Polling interval must be greater than or equal to request timeout"
+    }
   }
 }

@@ -43,11 +43,12 @@ class TinxyLocalException(Exception):
 
 class TinxyLocalHub:
     """TinxyLocalHub class for interacting with Tinxy devices locally."""
-    def __init__(self, hass, host: str) -> None:
+    def __init__(self, hass, host: str, request_timeout: int = 5) -> None:
         """Initialize with Home Assistant instance and the device host."""
         self.hass = hass
         self.host = f"http://{host}"
         self.ip_address = host
+        self.request_timeout = request_timeout
         
         # Rate limiting configuration
         self.command_timeout = 30.0  # seconds
@@ -120,7 +121,7 @@ class TinxyLocalHub:
                 url=url,
                 json=payload if method == "POST" else None,
                 headers=HEADERS,
-                timeout=2,
+                timeout=self.request_timeout,
             ) as response:
                 if response.status == 200:
                     return await response.json(content_type=None)
