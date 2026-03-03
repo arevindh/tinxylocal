@@ -3,6 +3,8 @@
 
 This guide will help you set up the **tinxy-local** integration for Home Assistant. Since this integration is in beta, please carefully follow each step and be prepared for potential troubleshooting.
 
+Join [Discord server](https://discord.gg/VH4jgz2f) for support.
+
 ## Prerequisites
 
 1. **Home Assistant Community Store (HACS)**: Ensure HACS is installed in your Home Assistant setup. HACS is required to add third-party custom integrations.
