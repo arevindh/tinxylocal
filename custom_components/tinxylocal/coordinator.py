@@ -15,6 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 REQUEST_REFRESH_DELAY = 0.50
 
 
+
 class TinxyUpdateCoordinator(DataUpdateCoordinator):
     """Coordinator to fetch data directly from Tinxy nodes."""
 
@@ -22,7 +23,12 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
     nodes: list[dict[str, Any]]
 
     def __init__(
-        self, hass: HomeAssistant, nodes: list[dict[str, Any]], web_session, default_polling_interval: int = 5
+        self,
+        hass: HomeAssistant,
+        nodes: list[dict[str, Any]],
+        hubs: list[TinxyLocalHub],
+        web_session,
+        default_polling_interval: int = 5,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
@@ -32,10 +38,11 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=default_polling_interval),
         )
         self.hass = hass
-        self.nodes = nodes  # Type-annotated as a list of dictionaries
+        self.nodes = nodes
+        self.hubs = hubs
         self.web_session = web_session
-        self.hubs = [TinxyLocalHub(hass, node["ip_address"]) for node in nodes]
-        self.device_metadata = {}  # Type-annotated as a dictionary
+        self.device_metadata: dict[str, dict[str, Any]] = {}
+        self._devices_registered = False
 
     async def _async_update_data(self):
         """Fetch data from each configured Tinxy node."""
@@ -45,6 +52,12 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
                 device_data = await hub.fetch_device_data(node, self.web_session)
                 if device_data:
                     status_list[node["device_id"]] = device_data
+                    _LOGGER.debug(
+                        "Node %s — IP: %s, RSSI: %s dBm",
+                        node["name"],
+                        device_data.get("ip"),
+                        device_data.get("rssi"),
+                    )
                     # Populate device metadata for other information (firmware, model, etc.)
                     self.device_metadata[node["device_id"]] = {
                         "firmware": device_data.get("firmware", "Unknown"),
@@ -70,8 +83,10 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
         self.data = status_list
         _LOGGER.debug("Coordinator data updated: %s", self.data)
 
-        # Call the device registration method after the initial data fetch
-        await self._register_devices()
+        # Register devices only once (not on every poll)
+        if not self._devices_registered:
+            await self._register_devices()
+            self._devices_registered = True
         return status_list
 
     async def _register_devices(self):

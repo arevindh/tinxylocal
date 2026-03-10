@@ -18,7 +18,7 @@ from .hub import TinxyLocalHub
 _LOGGER = logging.getLogger(__name__)
 
 # List the platforms that this integration will support.
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.FAN, Platform.LOCK]
+PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.FAN, Platform.LOCK, Platform.SENSOR]
 
 
 def _set_executable_permissions(directory: str):
@@ -78,8 +78,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Initialize TinxyLocalHub instances for each node
     hubs = [TinxyLocalHub(hass, node["ip_address"], request_timeout) for node in nodes]
 
-    # Initialize the coordinator with the list of nodes and web session
-    coordinator = TinxyUpdateCoordinator(hass, nodes, web_session, polling_interval)
+    # Initialize the coordinator with the list of nodes, hubs, and web session
+    coordinator = TinxyUpdateCoordinator(hass, nodes, hubs, web_session, polling_interval)
 
     # Store the coordinator and hubs in Home Assistant's data store
     hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator, "hubs": hubs}

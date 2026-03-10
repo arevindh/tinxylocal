@@ -58,7 +58,7 @@ async def validate_device(hass: HomeAssistant, host_ip, chip_id) -> dict[str, An
 async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Read Device List."""
     web_session = async_get_clientsession(hass)
-    _LOGGER.info(data)
+    _LOGGER.debug("Fetching device list for configured account")
 
     host_config = TinxyHostConfiguration(
         api_token=data[CONF_API_KEY], api_url=TINXY_BACKEND

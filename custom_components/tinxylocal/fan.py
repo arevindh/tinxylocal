@@ -134,20 +134,17 @@ class TinxyFan(CoordinatorEntity, FanEntity):
         return bool(node_data) and self.node_id in self.coordinator.device_metadata
 
     @property
-    def device_info(self) -> DeviceInfo | None:
+    def device_info(self) -> DeviceInfo:
         """Return device information to associate entities with the device."""
         metadata = self.coordinator.device_metadata.get(self.node_id, {})
-        device_name = (
-            self._attr_name.split(" ")[0] if self._attr_name else "Unknown Device"
+        node = next((n for n in self.coordinator.nodes if n["device_id"] == self.node_id), {})
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.node_id)},
+            name=node.get("name", self._attr_name),
+            manufacturer="Tinxy",
+            model=metadata.get("model", "Smart Device"),
+            sw_version=metadata.get("firmware", "Unknown"),
         )
-
-        return {
-            "identifiers": {(DOMAIN, self.node_id)},
-            "name": device_name,
-            "manufacturer": "Tinxy",
-            "model": metadata.get("model", "Smart Device"),
-            "sw_version": metadata.get("firmware", "Unknown"),
-        }
 
     @property
     def is_on(self) -> bool | None:
@@ -156,12 +153,12 @@ class TinxyFan(CoordinatorEntity, FanEntity):
             _LOGGER.debug(
                 "Coordinator data is not available for node %s", self._attr_unique_id
             )
-            return False
+            return None
 
         node_data = self.coordinator.data.get(self.node_id, {})
         if not node_data:
             _LOGGER.debug("Node data is missing for node %s", self.node_id)
-            return False
+            return None
 
         device_data = node_data.get("devices", [])
 

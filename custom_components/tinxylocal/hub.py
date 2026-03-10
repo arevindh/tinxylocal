@@ -5,7 +5,7 @@ import logging
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 import aiohttp
 import platform
@@ -23,9 +23,9 @@ class QueuedCommand:
     """Represents a queued command for a Tinxy device."""
     command_type: str  # 'toggle' or 'brightness'
     relay_number: int
-    action: Optional[int] = None
-    brightness: Optional[int] = None
-    future: Optional[asyncio.Future] = None
+    action: int | None = None
+    brightness: int | None = None
+    future: asyncio.Future | None = None
     timestamp: float = 0.0
     
     def __post_init__(self):
@@ -56,9 +56,9 @@ class TinxyLocalHub:
         self.rate_limit_delay = 1.0  # seconds between commands
         
         # Per-device command queues and workers
-        self.device_queues: Dict[str, deque] = {}
-        self.device_workers: Dict[str, asyncio.Task] = {}
-        self.device_last_command: Dict[str, float] = {}
+        self.device_queues: dict[str, deque] = {}
+        self.device_workers: dict[str, asyncio.Task] = {}
+        self.device_last_command: dict[str, float] = {}
         self._shutdown = False
 
     async def authenticate(self, api_key: str, web_session) -> bool:
@@ -94,17 +94,6 @@ class TinxyLocalHub:
         except TinxyConnectionException as _e:
             return "connection_error"
 
-    async def _validate_response(self, endpoint, response):
-        """Validate HTTP response from the device."""
-        if response.status == 200:
-            return await response.json(content_type=None)
-        if response.status == 400:
-            _LOGGER.error(
-                "Request failed at %s with status %d", endpoint, response.status
-            )
-            raise TinxyConnectionException(f"Request error: status {response.status}")
-        return None
-
     async def _send_request(
         self, method: str, endpoint: str, payload=None, web_session=None
     ):
@@ -138,6 +127,20 @@ class TinxyLocalHub:
         except Exception as e:  # noqa: BLE001
             handle_exception(f"Error for request to {url}: {e}", e)
 
+    def _get_executable_path(self) -> str | None:
+        """Return the CLI executable path for the current system architecture."""
+        build_path = self.hass.config.path("custom_components/tinxylocal/build")
+        machine = platform.machine()
+        arch_map: dict[str, str] = {
+            "x86_64": f"{build_path}/tinxy-cli_linux_amd64",
+            "amd64": f"{build_path}/tinxy-cli_linux_amd64",
+            "armv7l": f"{build_path}/tinxy-cli_linux_armv7",
+            "armv6l": f"{build_path}/tinxy-cli_linux_armv6",
+            "aarch64": f"{build_path}/tinxy-cli_linux_arm64",
+            "arm64": f"{build_path}/tinxy-cli_linux_arm64",
+        }
+        return arch_map.get(machine.lower())
+
     async def tinxy_toggle(
         self, mqttpass: str, relay_number: int, action: int) -> bool:
         """Toggle Tinxy device state using the CLI executable."""
@@ -147,34 +150,9 @@ class TinxyLocalHub:
 
         action_str = "on" if action == 1 else "off"
 
-        INTEGRATION_PATH = self.hass.config.path(f"custom_components/tinxylocal/build")
-        # Determine the correct executable based on the system architecture
-        system_arch = platform.machine()
-        arch_table = {
-            "x86_64": ["x64", "x86_64", "amd64", "intel"],
-            "armv7l": ["armv7l"],
-            "armv6l": ["armv6l"],
-            "aarch64": ["aarch64", "arm64"],
-            "win": ["win"],
-        }
-
-        executable_path = None
-        for arch, aliases in arch_table.items():
-            if system_arch in aliases or system_arch.startswith(arch):
-                if arch == "x86_64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_amd64"
-                elif arch == "armv7l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv7"
-                elif arch == "armv6l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv6"
-                elif arch == "aarch64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_arm64"
-                elif arch == "win":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_windows_amd64.exe"
-                break
-
+        executable_path = self._get_executable_path()
         if not executable_path:
-            _LOGGER.error("Unsupported system architecture: %s", system_arch)
+            _LOGGER.error("Unsupported system architecture: %s", platform.machine())
             return False
 
         command = [
@@ -211,35 +189,9 @@ class TinxyLocalHub:
     async def tinxy_set_brightness(
         self, mqttpass: str, relay_number: int, brightness: int) -> bool:
         """Set Tinxy device brightness using the CLI executable."""
-
-        INTEGRATION_PATH = self.hass.config.path(f"custom_components/tinxylocal/build")
-        # Determine the correct executable based on the system architecture
-        system_arch = platform.machine()
-        arch_table = {
-            "x86_64": ["x64", "x86_64", "amd64", "intel"],
-            "armv7l": ["armv7l"],
-            "armv6l": ["armv6l"],
-            "aarch64": ["aarch64", "arm64"],
-            "win": ["win"],
-        }
-
-        executable_path = None
-        for arch, aliases in arch_table.items():
-            if system_arch in aliases or system_arch.startswith(arch):
-                if arch == "x86_64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_amd64"
-                elif arch == "armv7l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv7"
-                elif arch == "armv6l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv6"
-                elif arch == "aarch64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_arm64"
-                elif arch == "win":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_windows_amd64.exe"
-                break
-
+        executable_path = self._get_executable_path()
         if not executable_path:
-            _LOGGER.error("Unsupported system architecture: %s", system_arch)
+            _LOGGER.error("Unsupported system architecture: %s", platform.machine())
             return False
 
         command = [
@@ -383,9 +335,9 @@ class TinxyLocalHub:
         mqttpass: str,
         command_type: str,
         relay_number: int,
-        action: Optional[int] = None,
-        brightness: Optional[int] = None,
-        deduplicate: bool = True
+        action: int | None = None,
+        brightness: int | None = None,
+        deduplicate: bool = True,
     ) -> bool:
         """Queue a command for execution with rate limiting."""
         if self._shutdown:

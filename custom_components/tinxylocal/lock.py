@@ -89,17 +89,16 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         return bool(node_data) and self.node_id in self.coordinator.device_metadata
 
     @property
-    def device_info(self) -> DeviceInfo | None:
+    def device_info(self) -> DeviceInfo:
         """Return device information to associate entities with the device."""
         metadata = self.coordinator.device_metadata.get(self.node_id, {})
-        
-        return {
-            "identifiers": {(DOMAIN, self.node_id)},
-            "name": self._attr_name,
-            "manufacturer": "Tinxy",
-            "model": self._device_data.get("typeId", {}).get("long_name", "Smart Lock"),
-            "sw_version": metadata.get("firmware", str(self._device_data.get("firmwareVersion", "Unknown"))),
-        }
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.node_id)},
+            name=self._attr_name,
+            manufacturer="Tinxy",
+            model=self._device_data.get("typeId", {}).get("long_name", "Smart Lock"),
+            sw_version=metadata.get("firmware", str(self._device_data.get("firmwareVersion", "Unknown"))),
+        )
 
     @property
     def is_locked(self) -> bool | None:
