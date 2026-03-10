@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import logging
+import socket
 from typing import Any
 
 import voluptuous as vol
 
 from homeassistant import config_entries
+from homeassistant.components.zeroconf import async_get_async_instance
 from homeassistant.const import CONF_API_KEY, CONF_HOST
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers import selector
+from zeroconf.asyncio import AsyncServiceInfo
 
 from .const import CONF_DEVICE, CONF_DEVICE_ID, CONF_MQTT_PASS, CONF_POLLING_INTERVAL, CONF_REQUEST_TIMEOUT, DEFAULT_POLLING_INTERVAL, DEFAULT_REQUEST_TIMEOUT, DOMAIN, TINXY_BACKEND
 from .hub import TinxyLocalHub
@@ -87,6 +90,39 @@ def find_device_by_id(devicelist, target_id):
     return None
 
 
+async def discover_device_host(hass: HomeAssistant, device_id: str) -> tuple[str, str]:
+    """Resolve a Tinxy device's local host, returning (host, method).
+
+    Tries mDNS first to get the actual IP address. If that fails, falls back
+    to the guaranteed .local mDNS hostname (tinxy{last5}.local) which works
+    on any network with mDNS — no static IP required.
+
+    Returns:
+        (host, method) where method is 'ip', 'hostname', or 'fallback'.
+    """
+    suffix = device_id[-5:]
+    local_hostname = f"tinxy{suffix}.local"
+    service_name = f"tinxy{suffix}._http._tcp.local."
+    _LOGGER.debug("Searching for mDNS service: %s", service_name)
+    try:
+        zc = await async_get_async_instance(hass)
+        info = AsyncServiceInfo("_http._tcp.local.", service_name)
+        if await info.async_request(zc, 3000):
+            if info.addresses:
+                ip = socket.inet_ntoa(info.addresses[0])
+                _LOGGER.debug("Auto-discovered %s at %s (IP)", device_id, ip)
+                return ip, "ip"
+            # Service found but no IP — use the server name from the record
+            if info.server:
+                hostname = info.server.rstrip(".")
+                _LOGGER.debug("Auto-discovered %s as %s (hostname)", device_id, hostname)
+                return hostname, "hostname"
+        _LOGGER.debug("mDNS lookup timed out, using .local hostname fallback")
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.debug("mDNS discovery failed for device %s: %s", device_id, err)
+    return local_hostname, "fallback"
+
+
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Tinxy Local."""
 
@@ -96,6 +132,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Initialize the config flow."""
         self.api_token = None
         self.cloud_devices = {}
+        self._selected_device: dict[str, Any] | None = None
+        self._discovered_host: str | None = None
+        self._discovery_method: str = "manual"
 
     @staticmethod
     def async_get_options_flow(
@@ -166,11 +205,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="user", data_schema=STEP_USER_DATA_SCHEMA)
 
     async def async_step_select_device(
-        self, user_input: dict[str, Any] = None
+        self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Select a device from cloud devices and configure IP."""
-        errors = {}
-
+        """Step 1: Choose a device from the cloud device list."""
         # Fetch devices from cloud using saved or new API key if not already fetched
         if not self.cloud_devices:
             self.cloud_devices = await read_devices(
@@ -187,14 +224,45 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
 
         if user_input:
-            try:
-                selected_device = find_device_by_id(
-                    self.cloud_devices, user_input[CONF_DEVICE_ID]
+            selected_device = find_device_by_id(
+                self.cloud_devices, user_input[CONF_DEVICE_ID]
+            )
+            if not selected_device:
+                return self.async_show_form(
+                    step_id="select_device",
+                    data_schema=vol.Schema({vol.Required(CONF_DEVICE_ID): vol.In(device_options)}),
+                    errors={"base": "device_not_found"},
                 )
 
-                if not selected_device:
-                    raise ValueError("Device not found")  # noqa: TRY301
+            self._selected_device = selected_device
 
+            # Attempt mDNS auto-discovery before showing the IP form
+            self._discovered_host, self._discovery_method = await discover_device_host(
+                self.hass, selected_device["_id"]
+            )
+            _LOGGER.info(
+                "Host for %s: %s (method: %s)",
+                selected_device["name"],
+                self._discovered_host,
+                self._discovery_method,
+            )
+
+            return await self.async_step_configure_ip()
+
+        return self.async_show_form(
+            step_id="select_device",
+            data_schema=vol.Schema({vol.Required(CONF_DEVICE_ID): vol.In(device_options)}),
+        )
+
+    async def async_step_configure_ip(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Step 2: Confirm or enter the device IP (pre-filled from mDNS if found)."""
+        errors: dict[str, str] = {}
+        selected_device = self._selected_device
+
+        if user_input:
+            try:
                 web_session = async_get_clientsession(self.hass)
                 hub = TinxyLocalHub(self.hass, user_input[CONF_HOST])
                 validate_status = await hub.validate_ip(
@@ -202,25 +270,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     selected_device["uuidRef"]["uuid"],
                 )
 
-                _LOGGER.debug("Device selection status: %s", validate_status)
+                _LOGGER.debug("IP validation status: %s", validate_status)
 
                 if validate_status == "wrong_chip_id":
                     raise ValueError(  # noqa: TRY301
-                        "Wrong Ip address, chip id should be {}".format(
+                        "Wrong IP address — expected chip ID {}".format(
                             selected_device["uuidRef"]["uuid"]
                         )
                     )
-
                 if validate_status == "api_not_available":
                     raise ValueError("Local API not available.")  # noqa: TRY301
-
                 if validate_status == "connection_error":
                     raise ValueError("Connection error.")  # noqa: TRY301
-                
-                # Check if 'devices' is an empty list and 'deviceTypes' has a single data
+
+                # Normalise empty-device edge case
                 if isinstance(selected_device.get("devices"), list) and not selected_device["devices"]:
                     if isinstance(selected_device.get("deviceTypes"), list) and len(selected_device["deviceTypes"]) == 1:
-                        # Set 'devices' to be the same as 'deviceTypes'
                         selected_device["devices"] = selected_device["deviceTypes"]
 
                 return self.async_create_entry(
@@ -235,19 +300,35 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
 
             except Exception as e:  # noqa: BLE001
-                _LOGGER.error("Device selection error: %s", e)
+                _LOGGER.error("IP configuration error: %s", e)
                 errors["base"] = str(e)
 
-        # Show device selection form with IP configuration
-        device_schema = vol.Schema(
+        # Build IP schema — pre-fill with discovered host if available
+        ip_schema = vol.Schema(
             {
-                vol.Required(CONF_DEVICE_ID): vol.In(device_options),
-                vol.Required(CONF_HOST): str,
+                vol.Required(CONF_HOST, default=self._discovered_host or vol.UNDEFINED): str,
             }
         )
 
+        _method_labels = {
+            "ip": "✓ Resolved IP address via mDNS: {host}",
+            "hostname": "✓ Found mDNS hostname: {host}",
+            "fallback": "Using .local hostname: {host} (no static IP needed)",
+            "manual": "Enter the device IP address or hostname manually.",
+        }
+        status_template = _method_labels.get(self._discovery_method, _method_labels["manual"])
+        discovery_status = status_template.format(host=self._discovered_host or "")
+
+        description_placeholders = {
+            "device_name": selected_device["name"],
+            "discovery_status": discovery_status,
+        }
+
         return self.async_show_form(
-            step_id="select_device", data_schema=device_schema, errors=errors
+            step_id="configure_ip",
+            data_schema=ip_schema,
+            description_placeholders=description_placeholders,
+            errors=errors,
         )
 
 

@@ -6,7 +6,7 @@
   ],
   "config_flow": true,
   "description": "Integration for Tinxy Local devices.",
-  "dependencies": [],
+  "dependencies": ["zeroconf"],
   "documentation": "https://github.com/arevindh/tinxylocal/blob/main/README.md",
   "issue_tracker": "https://github.com/arevindh/tinxylocal/issues",
   "homekit": {},

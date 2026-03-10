@@ -16,6 +16,23 @@
         "data": {
           "token_choice": "Token Option"
         }
+      },
+      "select_device": {
+        "title": "Select Device",
+        "description": "Select the Tinxy device you want to add.",
+        "data": {
+          "device_id": "Device"
+        }
+      },
+      "configure_ip": {
+        "title": "Configure Device Connection",
+        "description": "Device: **{device_name}**\n\n{discovery_status}",
+        "data": {
+          "host": "IP Address or Hostname"
+        },
+        "data_description": {
+          "host": "Local IP address (e.g. 192.168.1.50) or mDNS hostname (e.g. tinxy3de52.local)."
+        }
       }
     },
     "error": {
