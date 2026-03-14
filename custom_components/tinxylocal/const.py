@@ -6,7 +6,7 @@ CONF_MQTT_PASS = "mqtt_pass"
 CONF_DEVICE_ID = "device_id"
 CONF_REQUEST_TIMEOUT = "request_timeout"
 CONF_POLLING_INTERVAL = "polling_interval"
-TINXY_BACKEND = "https://ha-backend.tinxy.in/"
+TINXY_BACKEND = "https://backend.tinxy.in/"
 
 DEFAULT_REQUEST_TIMEOUT = 3
 DEFAULT_POLLING_INTERVAL = 6
