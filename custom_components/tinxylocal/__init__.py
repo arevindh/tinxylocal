@@ -63,15 +63,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "name": device_data["name"],
             "model": device_data["typeId"]["name"],
             "unique_id": device_data["_id"],
-            "devices": [
-                {"name": dev_name, "type": dev_type}
-                for dev_name, dev_type in zip(
-                    device_data["devices"], device_data["deviceTypes"], strict=False
+            "devices": (
+                [
+                    {"name": dev_name, "type": dev_type}
+                    for dev_name, dev_type in zip(
+                        device_data["devices"], device_data["deviceTypes"], strict=False
+                    )
+                ]
+                if device_data["devices"]
+                else (
+                    [{"name": device_data["name"], "type": "Lock"}]
+                    if device_data.get("typeId", {}).get("gtype") == "action.devices.types.LOCK"
+                    else (
+                        [
+                            {"name": dev_type or f"Device {i+1}", "type": dev_type or "Socket"}
+                            for i, dev_type in enumerate(device_data.get("deviceTypes", []))
+                        ]
+                        if device_data.get("deviceTypes")
+                        else [
+                            {"name": f"Device {i+1}", "type": "Socket"}
+                            for i in range(device_data.get("typeId", {}).get("numberOfRelays", 1))
+                        ]
+                    )
                 )
-            ] if device_data["devices"] else [
-                # For locks and other devices without individual relays, create a single device entry
-                {"name": device_data["name"], "type": "Lock"}
-            ] if device_data.get("typeId", {}).get("gtype") == "action.devices.types.LOCK" else [],
+            ),
         }
     ]
 
