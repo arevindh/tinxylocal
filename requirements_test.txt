@@ -1,3 +1,8 @@
 # Pins Home Assistant 2026.9.2, which needs Python 3.14.
-# Bump this together with the minimum version in manifest.json.
+# Bump this together with the minimum version in hacs.json.
 pytest-homeassistant-custom-component==0.13.365
+
+# The integration's own runtime dependency. Home Assistant installs this from
+# the manifest at setup, so the tests need it too. Keep in step with
+# custom_components/tinxylocal/manifest.json.
+tinxy==1.0.0
