@@ -8,14 +8,14 @@
   "dependencies": [],
   "documentation": "https://github.com/arevindh/tinxylocal/blob/main/README.md",
   "integration_type": "device",
-  "issue_tracker": "https://github.com/arevindh/tinxylocal/issues",
   "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/arevindh/tinxylocal/issues",
   "requirements": [],
+  "version": "3.0.0",
   "zeroconf": [
     {
       "name": "tinxy*",
       "type": "_http._tcp.local."
     }
-  ],
-  "version": "3.0.0"
+  ]
 }
