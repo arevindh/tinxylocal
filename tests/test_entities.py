@@ -71,16 +71,16 @@ async def test_optimistic_state_shows_while_command_is_in_flight(
     """
     import asyncio
 
-    hub = loaded_entry.runtime_data.hubs[0]
+    client = loaded_entry.runtime_data.clients[0]
     release = asyncio.Event()
 
-    async def _slow_command(*args):
+    async def _slow_command(*args, **kwargs):
         await release.wait()
         return True
 
     assert hass.states.get("switch.hall_led").state == STATE_OFF
 
-    with patch.object(hub, "queue_toggle_command", _slow_command):
+    with patch.object(client, "toggle", _slow_command):
         task = hass.async_create_task(
             hass.services.async_call(
                 "switch", "turn_on", {ATTR_ENTITY_ID: "switch.hall_led"}, blocking=True

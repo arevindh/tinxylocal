@@ -20,8 +20,9 @@ from .const import (
     DEFAULT_RATE_LIMIT_DELAY,
     DEFAULT_REQUEST_TIMEOUT,
 )
+from tinxy import TinxyLocalClient
+
 from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
-from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -32,6 +33,43 @@ PLATFORMS: list[Platform] = [
     Platform.LOCK,
     Platform.SENSOR,
 ]
+
+
+def _relays(device: dict) -> list[dict]:
+    """Return the relays of a stored cloud device, as name and type.
+
+    Mirrors `CloudDevice.relays()` in the tinxy package. Some devices report
+    neither relay names nor types, only a count, so the count is the fallback:
+    without it a one-gang unit yields no relays and therefore no entities.
+
+    Kept here rather than taken from the package because the entry stores the
+    raw API payload and the package's parser is not public. Replace this with
+    `CloudDevice.from_api(...)` once the package exposes one.
+    """
+    type_id = device.get("typeId") or {}
+    names = device.get("devices") or []
+    kinds = device.get("deviceTypes") or []
+    features = type_id.get("features") or []
+    is_lock = type_id.get("gtype") == "action.devices.types.LOCK"
+    count = max(len(names), len(kinds), int(type_id.get("numberOfRelays") or 0))
+
+    def kind_at(i: int) -> str:
+        if i < len(kinds):
+            return kinds[i]
+        if is_lock:
+            return "Lock"
+        # Capabilities can be combined, as in "SWITCH|FAN", so test as substring.
+        return "Fan" if i < len(features) and "FAN" in features[i] else "Socket"
+
+    return [
+        {
+            "name": names[i]
+            if i < len(names)
+            else (device["name"] if count == 1 else f"Relay {i + 1}"),
+            "type": kind_at(i),
+        }
+        for i in range(count)
+    ]
 
 
 def _async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -73,8 +111,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> boo
     # Spacing between commands to one device
     rate_limit_delay = entry.options.get(CONF_RATE_LIMIT_DELAY, DEFAULT_RATE_LIMIT_DELAY)
 
-    # Extract device configurations
     device_data = entry.data[CONF_DEVICE]
+    type_id = device_data.get("typeId") or {}
 
     nodes = [
         {
@@ -82,29 +120,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> boo
             "mqtt_password": entry.data[CONF_MQTT_PASS],
             "device_id": device_data["_id"],
             "name": device_data["name"],
-            "model": device_data["typeId"]["name"],
+            "model": type_id.get("name"),
             "unique_id": device_data["_id"],
-            "devices": [
-                {"name": dev_name, "type": dev_type}
-                for dev_name, dev_type in zip(
-                    device_data["devices"], device_data["deviceTypes"], strict=False
-                )
-            ] if device_data["devices"] else [
-                # For locks and other devices without individual relays, create a single device entry
-                {"name": device_data["name"], "type": "Lock"}
-            ] if device_data.get("typeId", {}).get("gtype") == "action.devices.types.LOCK" else [],
+            "devices": _relays(device_data),
         }
     ]
 
-    # Initialize TinxyLocalHub instances for each node
-    hubs = [
-        TinxyLocalHub(hass, node["ip_address"], request_timeout, rate_limit_delay)
+    clients = [
+        TinxyLocalClient(
+            node["ip_address"],
+            web_session,
+            request_timeout=request_timeout,
+            command_spacing=rate_limit_delay,
+        )
         for node in nodes
     ]
 
-    # Initialize the coordinator with the list of nodes and web session
     coordinator = TinxyUpdateCoordinator(
-        hass, entry, nodes, web_session, hubs, polling_interval
+        hass, entry, nodes, clients, polling_interval
     )
 
     # Bronze `test-before-setup`: fail setup with ConfigEntryNotReady if the
@@ -124,6 +157,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> bo
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         # Stop the per-device command workers.
-        for hub in entry.runtime_data.hubs:
-            await hub.shutdown()
+        for client in entry.runtime_data.clients:
+            await client.aclose()
     return unload_ok

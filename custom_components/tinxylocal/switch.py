@@ -11,10 +11,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 
-from .const import DOMAIN
+from .const import DOMAIN, ICONS
+from tinxy import TinxyLocalClient
+
 from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 from .entity import TinxyOptimisticMixin
-from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Tinxy switches based on a config entry."""
     coordinator = entry.runtime_data
-    hubs = coordinator.hubs
+    clients = coordinator.clients
 
     # Skip creating switches if this is a lock device
     device_data = entry.data["device"]
@@ -70,7 +71,7 @@ async def async_setup_entry(
             
             switch = TinxySwitch(
                 coordinator=coordinator,
-                hub=hubs[0],
+                client=clients[0],
                 node_id=node["device_id"],
                 relay_number=relay_number,
                 device_name=device_name,
@@ -92,7 +93,7 @@ class TinxySwitch(TinxyOptimisticMixin, CoordinatorEntity, SwitchEntity):
     def __init__(
         self,
         coordinator: TinxyUpdateCoordinator,
-        hub: TinxyLocalHub,
+        client: TinxyLocalClient,
         node_id: str,
         relay_number: int,
         device_name: str,
@@ -102,7 +103,7 @@ class TinxySwitch(TinxyOptimisticMixin, CoordinatorEntity, SwitchEntity):
         """Initialize the Tinxy switch."""
         super().__init__(coordinator)
         self.coordinator = coordinator
-        self.hub = hub
+        self.client = client
         self.node_id = node_id
         self.relay_number = relay_number
         self._attr_name = name
@@ -117,26 +118,37 @@ class TinxySwitch(TinxyOptimisticMixin, CoordinatorEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the last poll succeeded and this node reported data."""
+        """Return True if the last poll succeeded and this device reported data."""
         # `last_update_success` is what goes false when the device stops answering;
         # without it the entity would keep serving the last state it ever saw.
-        if not self.coordinator.last_update_success or self.coordinator.data is None:
-            return False
+        return (
+            self.coordinator.last_update_success
+            and self.node_id in (self.coordinator.data or {})
+        )
 
-        node_data = self.coordinator.data.get(self.node_id, {})
-        return bool(node_data) and self.node_id in self.coordinator.device_metadata
+    @property
+    def _status(self):
+        """Return this device's last reported status, if any."""
+        return (self.coordinator.data or {}).get(self.node_id)
+
+    @property
+    def _relay(self):
+        """Return this entity's relay, if the device reported it."""
+        status = self._status
+        if status and len(status.relays) >= self.relay_number:
+            return status.relays[self.relay_number - 1]
+        return None
 
     @property
     def device_info(self) -> DeviceInfo | None:
         """Return device information to associate entities with the device."""
-        metadata = self.coordinator.device_metadata.get(self.node_id, {})
-
+        status = self._status
         return {
             "identifiers": {(DOMAIN, self.node_id)},
             "name": self._device_name,
             "manufacturer": "Tinxy",
-            "model": metadata.get("model", "Smart Device"),
-            "sw_version": metadata.get("firmware", "Unknown"),
+            "model": status.model if status else None,
+            "sw_version": status.firmware if status else None,
         }
 
     @property
@@ -145,46 +157,22 @@ class TinxySwitch(TinxyOptimisticMixin, CoordinatorEntity, SwitchEntity):
         if self._optimistic is not None:
             return self._optimistic
 
-        # Check if coordinator data is available and fetch data based on node_id
-        if self.coordinator.data is None:
-            _LOGGER.debug(
-                "Coordinator data is not available for node %s", self._attr_unique_id
-            )
-            return False  # Default to off if data is not available
-
-        node_data = self.coordinator.data.get(self.node_id, {})
-        if not node_data:
-            _LOGGER.debug("Node data is missing for node %s", self.node_id)
-            return False
-
-        # Access the device data within the node data
-        device_data = node_data.get("devices", [])
-
-        # Adjust for 1-based relay numbering
-        if len(device_data) >= self.relay_number:
-            return device_data[self.relay_number - 1].get("status") == "on"
-
-        _LOGGER.debug(
-            "Device data is unavailable for relay number %s in node %s",
-            self.relay_number,
-            self.node_id,
-        )
-        return False
+        relay = self._relay
+        return relay.is_on if relay else False
 
     @property
     def icon(self) -> str:
         """Return the icon of the switch."""
-        return self.hub.get_device_icon(self._device_type)
+        return ICONS.get(self._device_type, "mdi:toggle-switch")
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
         await self._async_command(
             True,
-            self.hub.queue_toggle_command(
-                self.node_id,
+            self.client.toggle(
                 self.coordinator.nodes[0]["mqtt_password"],
-                self.relay_number,
-                1,
+                relay=self.relay_number,
+                on=True,
             ),
         )
 
@@ -192,10 +180,9 @@ class TinxySwitch(TinxyOptimisticMixin, CoordinatorEntity, SwitchEntity):
         """Turn the switch off."""
         await self._async_command(
             False,
-            self.hub.queue_toggle_command(
-                self.node_id,
+            self.client.toggle(
                 self.coordinator.nodes[0]["mqtt_password"],
-                self.relay_number,
-                0,
+                relay=self.relay_number,
+                on=False,
             ),
         )

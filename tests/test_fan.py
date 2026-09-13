@@ -70,14 +70,14 @@ async def test_fan_speed_snaps_to_the_three_hardware_levels(
 ) -> None:
     """The hardware has 33/66/100, so 50% must become 66%, as the CLI did."""
     entry = await _setup_fan(hass, aioclient_mock)
-    hub = entry.runtime_data.hubs[0]
+    client = entry.runtime_data.clients[0]
     sent = []
 
-    async def _capture(device_id, mqttpass, relay, brightness):
+    async def _capture(device_key, *, relay, brightness):
         sent.append(brightness)
         return True
 
-    hub.queue_brightness_command = _capture
+    client.set_brightness = _capture
 
     await hass.services.async_call(
         "fan",
@@ -95,18 +95,18 @@ async def test_fan_off_sends_a_plain_toggle(
 ) -> None:
     """Turning off must not carry a brightness, matching the device protocol."""
     entry = await _setup_fan(hass, aioclient_mock)
-    hub = entry.runtime_data.hubs[0]
+    client = entry.runtime_data.clients[0]
     actions = []
 
-    async def _capture(device_id, mqttpass, relay, action):
-        actions.append(action)
+    async def _capture(device_key, *, relay, on):
+        actions.append(on)
         return True
 
-    hub.queue_toggle_command = _capture
+    client.toggle = _capture
 
     await hass.services.async_call(
         "fan", "turn_off", {ATTR_ENTITY_ID: "fan.bedroom_ceiling"}, blocking=True
     )
     await hass.async_block_till_done()
 
-    assert actions == [0]
+    assert actions == [False]

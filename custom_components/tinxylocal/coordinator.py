@@ -1,8 +1,16 @@
-"""Tinxy Node Update Coordinator."""
+"""Poll Tinxy devices over the local network."""
 
-from datetime import timedelta
+from __future__ import annotations
+
 import logging
-from typing import Any
+from datetime import timedelta
+
+from tinxy import (
+    DeviceStatus,
+    Relay,
+    TinxyError,
+    TinxyLocalClient,
+)
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -10,101 +18,86 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import DOMAIN
-from .hub import TinxyConnectionException, TinxyLocalException, TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
-REQUEST_REFRESH_DELAY = 0.50
 
 # Bronze `runtime-data`: the coordinator lives on the entry, not in hass.data.
-# It owns the hubs, so it is the only thing the platforms need.
+# It owns the clients, so it is the only thing the platforms need.
 type TinxyConfigEntry = ConfigEntry[TinxyUpdateCoordinator]
 
 
-class TinxyUpdateCoordinator(DataUpdateCoordinator):
-    """Coordinator to fetch data directly from Tinxy nodes."""
+class TinxyUpdateCoordinator(DataUpdateCoordinator[dict[str, DeviceStatus]]):
+    """Keep one device's state fresh.
 
-    device_metadata: dict[str, dict[str, Any]]
-    nodes: list[dict[str, Any]]
+    `data` is keyed by device id and holds the library's `DeviceStatus`, which
+    carries both the relay states and the device details the entities need, so
+    there is no second metadata store to keep in step.
+    """
 
     def __init__(
         self,
         hass: HomeAssistant,
         config_entry: ConfigEntry,
-        nodes: list[dict[str, Any]],
-        web_session,
-        hubs: list[TinxyLocalHub],
-        default_polling_interval: int = 5,
+        nodes: list[dict],
+        clients: list[TinxyLocalClient],
+        polling_interval: int,
     ) -> None:
         """Initialize the coordinator."""
         super().__init__(
             hass,
             _LOGGER,
-            name="Tinxy Nodes",
+            name="Tinxy",
             config_entry=config_entry,
-            update_interval=timedelta(seconds=default_polling_interval),
+            update_interval=timedelta(seconds=polling_interval),
         )
-        self.hass = hass
-        self.nodes = nodes  # Type-annotated as a list of dictionaries
-        self.web_session = web_session
+        self.nodes = nodes
         # Shared with the platforms, so polling honours the configured timeout
         # and commands queue against the same per-device worker.
-        self.hubs = hubs
-        self.device_metadata = {}  # Type-annotated as a dictionary
+        self.clients = clients
         self._devices_registered = False
 
-    async def _async_update_data(self):
-        """Fetch data from each configured Tinxy node."""
-        status_list = {}
-        errors = []
-        for hub, node in zip(self.hubs, self.nodes, strict=False):
+    def relays_for(self, node: dict) -> list[Relay]:
+        """Return the relay names and types the owner configured in the app."""
+        return [Relay(d["name"], d["type"]) for d in node["devices"]]
+
+    async def _async_update_data(self) -> dict[str, DeviceStatus]:
+        """Read every configured device."""
+        statuses: dict[str, DeviceStatus] = {}
+        errors: list[str] = []
+
+        for client, node in zip(self.clients, self.nodes, strict=False):
             try:
-                device_data = await hub.fetch_device_data(node, self.web_session)
-                if device_data:
-                    status_list[node["device_id"]] = device_data
-                    # Populate device metadata for other information (firmware, model, etc.)
-                    self.device_metadata[node["device_id"]] = {
-                        # str(): the device reports firmware as an int, and HA
-                        # rejects a non-string sw_version from 2026.12. Coerced
-                        # here so all five device_info consumers get a string.
-                        "firmware": str(device_data.get("firmware", "Unknown")),
-                        "model": device_data.get("model", "Tinxy Smart Device"),
-                        "rssi": device_data.get("rssi"),
-                        "ssid": device_data.get("ssid"),
-                        "ip": device_data.get("ip"),
-                        "version": device_data.get("version"),
-                        "door": device_data.get("door"),
-                    }
-            except (TinxyConnectionException, TinxyLocalException) as err:
+                statuses[node["device_id"]] = await client.get_status(
+                    self.relays_for(node)
+                )
+            except TinxyError as err:
                 errors.append(f"{node['name']}: {err}")
 
-        # A node that stops answering must mark its entities unavailable rather than
-        # leave them showing the last state it happened to report. DataUpdateCoordinator
-        # logs this once and keeps the previous self.data, so entities can fall back to
-        # `last_update_success` instead of stale values.
-        if not status_list:
-            raise UpdateFailed("; ".join(errors) or "No Tinxy node returned data")
-
-        _LOGGER.debug("Coordinator data updated: %s", status_list)
+        # A device that stops answering must mark its entities unavailable rather
+        # than leave them showing the last state it happened to report.
+        # DataUpdateCoordinator logs this once and keeps the previous data, so
+        # entities fall back to `last_update_success` instead of stale values.
+        if not statuses:
+            raise UpdateFailed("; ".join(errors) or "No Tinxy device returned data")
 
         if not self._devices_registered:
-            await self._register_devices()
+            self._register_devices(statuses)
             self._devices_registered = True
-        return status_list
 
-    async def _register_devices(self):
-        """Register devices in the Home Assistant device registry after data is loaded."""
-        device_registry = dr.async_get(self.hass)
+        return statuses
+
+    def _register_devices(self, statuses: dict[str, DeviceStatus]) -> None:
+        """Add each device to the registry, once rather than on every poll."""
+        registry = dr.async_get(self.hass)
         for node in self.nodes:
-            metadata = self.device_metadata.get(node["device_id"], {})
-            firmware_version = metadata.get("firmware", "Unknown")
-            model = metadata.get("model", "Tinxy Smart Device")
-
-            # Only use identifiers without connections
-            device_registry.async_get_or_create(
+            status = statuses.get(node["device_id"])
+            registry.async_get_or_create(
                 config_entry_id=self.config_entry.entry_id,
                 identifiers={(DOMAIN, node["device_id"])},
                 name=node["name"],
                 manufacturer="Tinxy",
-                model=model,
-                sw_version=firmware_version,
+                model=(status.model if status else None) or node.get("model"),
+                # The library returns this as text; the device reports a number
+                # and the registry rejects one.
+                sw_version=status.firmware if status else None,
             )

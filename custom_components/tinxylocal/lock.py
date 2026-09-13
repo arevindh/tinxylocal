@@ -10,9 +10,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from tinxy import TinxyLocalClient
+
 from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 from .entity import TinxyOptimisticMixin
-from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ async def async_setup_entry(
 ) -> None:
     """Set up Tinxy locks based on a config entry."""
     coordinator = entry.runtime_data
-    hubs = coordinator.hubs
+    clients = coordinator.clients
 
     locks = []
     device_data = entry.data["device"]
@@ -35,7 +36,7 @@ async def async_setup_entry(
             # For lock devices, create a single lock entity
             lock = TinxyLock(
                 coordinator=coordinator,
-                hub=hubs[0],
+                client=clients[0],
                 node_id=node["device_id"],
                 relay_number=1,  # Locks typically use relay 1
                 device_name=node["name"],
@@ -57,7 +58,7 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
     def __init__(
         self,
         coordinator: TinxyUpdateCoordinator,
-        hub: TinxyLocalHub,
+        client: TinxyLocalClient,
         node_id: str,
         relay_number: int,
         device_name: str,
@@ -66,7 +67,7 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
         """Initialize the Tinxy lock."""
         super().__init__(coordinator)
         self.coordinator = coordinator
-        self.hub = hub
+        self.client = client
         self.node_id = node_id
         self.relay_number = relay_number
         self._device_name = device_name
@@ -81,87 +82,57 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the last poll succeeded and this node reported data."""
-        # `last_update_success` is what goes false when the device stops answering;
-        # without it the entity would keep serving the last state it ever saw.
-        if not self.coordinator.last_update_success or self.coordinator.data is None:
-            return False
+        """Return True if the last poll succeeded and this device reported data."""
+        return (
+            self.coordinator.last_update_success
+            and self.node_id in (self.coordinator.data or {})
+        )
 
-        node_data = self.coordinator.data.get(self.node_id, {})
-        return bool(node_data) and self.node_id in self.coordinator.device_metadata
+    @property
+    def _status(self):
+        """Return this device's last reported status, if any."""
+        return (self.coordinator.data or {}).get(self.node_id)
+
+    @property
+    def _relay(self):
+        """Return this entity's relay, if the device reported it."""
+        status = self._status
+        if status and len(status.relays) >= self.relay_number:
+            return status.relays[self.relay_number - 1]
+        return None
 
     @property
     def device_info(self) -> DeviceInfo | None:
         """Return device information to associate entities with the device."""
-        metadata = self.coordinator.device_metadata.get(self.node_id, {})
-        
+        status = self._status
         return {
             "identifiers": {(DOMAIN, self.node_id)},
             "name": self._device_name,
             "manufacturer": "Tinxy",
             "model": self._device_data.get("typeId", {}).get("long_name", "Smart Lock"),
-            "sw_version": metadata.get("firmware", str(self._device_data.get("firmwareVersion", "Unknown"))),
+            "sw_version": status.firmware if status else None,
         }
 
     @property
     def is_locked(self) -> bool | None:
-        """Return True if the lock is locked."""
+        """Return True if the lock is locked.
+
+        A pulse relay has no lock state to read back. The firmware reports a
+        `door` field on units that have the sensor, which is authoritative when
+        present; otherwise an idle relay is taken to mean locked.
+        """
         if self._optimistic == "unlocking":
             return False
 
-        # For pulse switches (like door locks), determining lock state is challenging
-        # since they don't maintain state like regular switches.
-        # We'll use a simple approach: assume the lock is locked by default
-        # and only show as unlocked briefly after an unlock command.
-        
-        if self.coordinator.data is None:
-            _LOGGER.debug(
-                "Coordinator data is not available for node %s", self._attr_unique_id
-            )
-            return True  # Default to locked when no data
+        status = self._status
+        if status is None:
+            return True
 
-        node_data = self.coordinator.data.get(self.node_id, {})
-        if not node_data:
-            _LOGGER.debug("Node data is missing for node %s", self.node_id)
-            return True  # Default to locked when no data
-
-        # Check door status first
-        metadata = self.coordinator.device_metadata.get(self.node_id, {})
-        door_status = metadata.get("door")
-        
-        if door_status == "OPEN":
-            # If door is open, consider the lock as unlocked
+        if status.door == "OPEN":
             return False
-        elif door_status == "CLOSED":
-            # If door is closed, check the device status
-            device_data = node_data.get("devices", [])
-            if not device_data:
-                # No device data available, assume locked
-                return True
-                
-            if len(device_data) >= self.relay_number:
-                status = device_data[self.relay_number - 1].get("status", "off")
-                # For pulse switches: "on" might indicate recently activated (unlocked)
-                # "off" indicates idle state (locked)
-                return status == "off"
 
-            # Default to locked if we can't determine state
-            return True
-        else:
-            # Door status unknown, fall back to device status logic
-            device_data = node_data.get("devices", [])
-            if not device_data:
-                # No device data available, assume locked
-                return True
-                
-            if len(device_data) >= self.relay_number:
-                status = device_data[self.relay_number - 1].get("status", "off")
-                # For pulse switches: "on" might indicate recently activated (unlocked)
-                # "off" indicates idle state (locked)
-                return status == "off"
-
-            # Default to locked if we can't determine state
-            return True
+        relay = self._relay
+        return relay.is_on is False if relay else True
 
     @property
     def is_unlocking(self) -> bool:
@@ -170,28 +141,19 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return extra state attributes."""
-        metadata = self.coordinator.device_metadata.get(self.node_id, {})
-        attributes = {}
-        
-        if "door" in metadata:
-            attributes["door_status"] = metadata["door"]
-            
-        return attributes if attributes else None
+        """Expose the door sensor where the device has one."""
+        status = self._status
+        if status and status.door:
+            return {"door_status": status.door}
+        return None
 
     @property
     def icon(self) -> str:
         """Return the icon of the lock."""
-        metadata = self.coordinator.device_metadata.get(self.node_id, {})
-        door_status = metadata.get("door")
-        
-        if door_status == "OPEN":
+        status = self._status
+        if status and status.door == "OPEN":
             return "mdi:door-open"
-        elif door_status == "CLOSED":
-            return "mdi:lock" if self.is_locked else "mdi:lock-open"
-        else:
-            # Fallback to default behavior if door status is unknown
-            return "mdi:lock" if self.is_locked else "mdi:lock-open"
+        return "mdi:lock" if self.is_locked else "mdi:lock-open"
 
     async def async_lock(self, **kwargs: Any) -> None:
         """Lock the device."""
@@ -208,10 +170,9 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
         # The lock will automatically lock again after its configured timeout.
         await self._async_command(
             "unlocking",
-            self.hub.queue_toggle_command(
-                self.node_id,
+            self.client.toggle(
                 self.coordinator.nodes[0]["mqtt_password"],
-                self.relay_number,
-                1,
+                relay=self.relay_number,
+                on=True,
             ),
         )

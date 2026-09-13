@@ -30,3 +30,18 @@ CONF_EDIT_DEVICE = "edit_device"
 CONF_SETUP_CLOUD = "setup_cloud"
 CONF_NO_CLOUD = "no_cloud"
 CONF_DEVICE = "device"
+
+# Icons by the relay type the owner picked in the Tinxy app. These are Home
+# Assistant vocabulary, so they live here rather than in the tinxy package.
+ICONS = {
+    "Heater": "mdi:radiator",
+    "Tubelight": "mdi:lightbulb-fluorescent-tube",
+    "LED Bulb": "mdi:lightbulb",
+    "Dimmable Light": "mdi:lightbulb",
+    "LED Dimmable Bulb": "mdi:lightbulb",
+    "Music System": "mdi:music",
+    "Fan": "mdi:fan",
+    "Socket": "mdi:power-socket-eu",
+    "TV": "mdi:television",
+    "Lock": "mdi:lock",
+}

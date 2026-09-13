@@ -17,8 +17,7 @@ from homeassistant.helpers import selector
 from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
 
 from .const import CONF_DEVICE, CONF_DEVICE_ID, CONF_MQTT_PASS, CONF_POLLING_INTERVAL, CONF_RATE_LIMIT_DELAY, CONF_REQUEST_TIMEOUT, DEFAULT_POLLING_INTERVAL, DEFAULT_RATE_LIMIT_DELAY, DEFAULT_REQUEST_TIMEOUT, DOMAIN, TINXY_BACKEND
-from .hub import TinxyConnectionException, TinxyLocalHub
-from .tinxycloud import TinxyCloud, TinxyHostConfiguration
+from tinxy import TinxyCloud, TinxyConnectionError, TinxyLocalClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,54 +49,52 @@ STEP_DEVICE_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Read Device List."""
-    web_session = async_get_clientsession(hass)
-
-    host_config = TinxyHostConfiguration(
-        api_token=data[CONF_API_KEY], api_url=TINXY_BACKEND
+async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> list:
+    """Return the locally controllable devices on the account."""
+    api = TinxyCloud(
+        async_get_clientsession(hass),
+        data[CONF_API_KEY],
+        api_url=TINXY_BACKEND,
+        source="Home Assistant",
     )
-    api = TinxyCloud(host_config=host_config, web_session=web_session)
-
-    return await api.get_device_list()
+    return await api.get_devices()
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the API key and fetch device list."""
-    web_session = async_get_clientsession(hass)
-    hub = TinxyLocalHub(hass, TINXY_BACKEND)
-
-    if not await hub.authenticate(data[CONF_API_KEY], web_session):
+    """Validate the API key."""
+    api = TinxyCloud(
+        async_get_clientsession(hass), data[CONF_API_KEY], api_url=TINXY_BACKEND
+    )
+    if not await api.verify_token():
         raise InvalidAuth
 
     return {"title": "Tinxy.in"}
 
 
-def _backfill_device_names(device: dict[str, Any]) -> None:
-    """Give single-relay devices (locks etc.) a name list, which the cloud leaves empty."""
-    if isinstance(device.get("devices"), list) and not device["devices"]:
-        if isinstance(device.get("deviceTypes"), list) and len(device["deviceTypes"]) == 1:
-            device["devices"] = device["deviceTypes"]
+def _entry_data(device, host: str, api_token: str) -> dict[str, Any]:
+    """Build the config entry payload for a selected cloud device.
 
+    `CONF_DEVICE` keeps the raw API payload rather than the parsed object, so
+    entries written by earlier versions load unchanged and nothing has to be
+    migrated.
+    """
+    raw = dict(device.raw)
+    # Single-relay devices, locks especially, come back with no relay names.
+    if not raw.get("devices") and len(raw.get("deviceTypes") or []) == 1:
+        raw["devices"] = list(raw["deviceTypes"])
 
-def _entry_data(device: dict[str, Any], host: str, api_token: str) -> dict[str, Any]:
-    """Build the config entry payload for a selected cloud device."""
-    _backfill_device_names(device)
     return {
-        CONF_DEVICE: device,
+        CONF_DEVICE: raw,
         CONF_HOST: host,
-        CONF_MQTT_PASS: device["mqttPassword"],
-        CONF_DEVICE_ID: device["uuidRef"]["uuid"],
+        CONF_MQTT_PASS: device.device_key,
+        CONF_DEVICE_ID: device.chip_id,
         CONF_API_KEY: api_token,
     }
 
 
-def find_device_by_id(devicelist, target_id):
-    """Find device by its ID in the list."""
-    for device in devicelist:
-        if device["_id"] == target_id:
-            return device
-    return None
+def find_device_by_id(devices, target_id):
+    """Find a device by its cloud id."""
+    return next((d for d in devices if d.id == target_id), None)
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -128,10 +125,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # The mDNS name only carries a truncated id, so ask the device itself.
         try:
-            info = await TinxyLocalHub(self.hass, host).get_info(
-                async_get_clientsession(self.hass)
-            )
-        except TinxyConnectionException:
+            info = await TinxyLocalClient(
+                host, async_get_clientsession(self.hass)
+            ).get_info()
+        except TinxyConnectionError:
             return self.async_abort(reason="cannot_connect")
 
         if not info or not info.get("chip_id"):
@@ -167,20 +164,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 devices = await read_devices(self.hass, {CONF_API_KEY: self.api_token})
                 device = next(
-                    (
-                        item
-                        for item in devices
-                        if item.get("uuidRef", {}).get("uuid")
-                        == self.discovered_chip_id
-                        and "mqttPassword" in item
-                    ),
+                    (d for d in devices if d.chip_id == self.discovered_chip_id),
                     None,
                 )
                 if device is None:
                     errors["base"] = "device_not_in_account"
                 else:
                     return self.async_create_entry(
-                        title=device["name"],
+                        title=device.name,
                         data=_entry_data(device, self.discovered_host, self.api_token),
                     )
             except Exception:  # noqa: BLE001
@@ -266,11 +257,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Build the selection schema
         device_options = {
-            item["_id"]: "{} ({})".format(item["name"], item["uuidRef"]["uuid"])
-            for item in self.cloud_devices
-            if "mqttPassword" in item
-            and "uuidRef" in item
-            and "uuid" in item["uuidRef"]
+            d.id: f"{d.name} ({d.chip_id})" for d in self.cloud_devices
         }
 
         if user_input:
@@ -282,34 +269,29 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 if not selected_device:
                     raise ValueError("Device not found")  # noqa: TRY301
 
-                web_session = async_get_clientsession(self.hass)
-                hub = TinxyLocalHub(self.hass, user_input[CONF_HOST])
-                validate_status = await hub.validate_ip(
-                    web_session,
-                    selected_device["uuidRef"]["uuid"],
+                client = TinxyLocalClient(
+                    user_input[CONF_HOST], async_get_clientsession(self.hass)
                 )
+                try:
+                    info = await client.get_info()
+                except TinxyConnectionError as err:
+                    raise ValueError("Connection error.") from err  # noqa: TRY301
 
-                _LOGGER.debug("Device selection status: %s", validate_status)
-
-                if validate_status == "wrong_chip_id":
-                    raise ValueError(  # noqa: TRY301
-                        "Wrong Ip address, chip id should be {}".format(
-                            selected_device["uuidRef"]["uuid"]
-                        )
-                    )
-
-                if validate_status == "api_not_available":
+                if not info.get("chip_id"):
                     raise ValueError("Local API not available.")  # noqa: TRY301
 
-                if validate_status == "connection_error":
-                    raise ValueError("Connection error.")  # noqa: TRY301
+                if str(info["chip_id"]) != selected_device.chip_id:
+                    raise ValueError(  # noqa: TRY301
+                        f"Wrong Ip address, chip id should be "
+                        f"{selected_device.chip_id}"
+                    )
 
                 # Keyed on the chip id so mDNS discovery recognises this device later.
-                await self.async_set_unique_id(selected_device["uuidRef"]["uuid"])
+                await self.async_set_unique_id(selected_device.chip_id)
                 self._abort_if_unique_id_configured()
 
                 return self.async_create_entry(
-                    title=selected_device["name"],
+                    title=selected_device.name,
                     data=_entry_data(
                         selected_device, user_input[CONF_HOST], self.api_token
                     ),

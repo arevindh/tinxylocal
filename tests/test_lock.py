@@ -65,21 +65,21 @@ async def test_unlock_sends_a_pulse(
 ) -> None:
     """Unlocking is a single action=1 pulse; the device re-locks on its timer."""
     entry = await _setup_lock(hass, aioclient_mock, {**DEVICE_INFO, "state": "0"})
-    hub = entry.runtime_data.hubs[0]
+    client = entry.runtime_data.clients[0]
     sent = []
 
-    async def _capture(device_id, mqttpass, relay, action):
-        sent.append((relay, action))
+    async def _capture(device_key, *, relay, on):
+        sent.append((relay, on))
         return True
 
-    hub.queue_toggle_command = _capture
+    client.toggle = _capture
 
     await hass.services.async_call(
         "lock", "unlock", {ATTR_ENTITY_ID: "lock.front_door"}, blocking=True
     )
     await hass.async_block_till_done()
 
-    assert sent == [(1, 1)]
+    assert sent == [(1, True)]
 
 
 async def test_lock_command_is_a_no_op(
@@ -87,14 +87,14 @@ async def test_lock_command_is_a_no_op(
 ) -> None:
     """There is no lock command in the protocol, so nothing is sent."""
     entry = await _setup_lock(hass, aioclient_mock, {**DEVICE_INFO, "state": "0"})
-    hub = entry.runtime_data.hubs[0]
+    client = entry.runtime_data.clients[0]
     sent = []
 
-    async def _capture(*args):
-        sent.append(args)
+    async def _capture(*args, **kwargs):
+        sent.append((args, kwargs))
         return True
 
-    hub.queue_toggle_command = _capture
+    client.toggle = _capture
 
     await hass.services.async_call(
         "lock", "lock", {ATTR_ENTITY_ID: "lock.front_door"}, blocking=True

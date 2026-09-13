@@ -66,11 +66,11 @@ async def test_migration_leaves_new_entries_alone(
     """An entry created by 3.0.0 keeps the current defaults."""
     assert loaded_entry.unique_id == CHIP_ID
     assert CONF_RATE_LIMIT_DELAY not in loaded_entry.options
-    hub = loaded_entry.runtime_data.hubs[0]
-    assert hub.rate_limit_delay == DEFAULT_RATE_LIMIT_DELAY
+    client = loaded_entry.runtime_data.clients[0]
+    assert client.command_spacing == DEFAULT_RATE_LIMIT_DELAY
 
 
-async def test_options_are_applied_to_the_hub(
+async def test_options_are_applied_to_the_client(
     hass: HomeAssistant, device_online: AiohttpClientMocker
 ) -> None:
     """Configured timeout reaches polling, which it did not before 3.0.0."""
@@ -88,6 +88,6 @@ async def test_options_are_applied_to_the_hub(
     await hass.async_block_till_done()
 
     coordinator = entry.runtime_data
-    # the coordinator must poll through the same hubs the platforms command
-    assert coordinator.hubs[0].request_timeout == 9
-    assert coordinator.hubs[0].rate_limit_delay == 3
+    # the coordinator must poll through the same clients the platforms command
+    assert coordinator.clients[0].request_timeout == 9
+    assert coordinator.clients[0].command_spacing == 3

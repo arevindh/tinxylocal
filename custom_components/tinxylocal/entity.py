@@ -15,11 +15,7 @@ from typing import Any
 from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 
-from .hub import (
-    TinxyCommandSuperseded,
-    TinxyConnectionException,
-    TinxyLocalException,
-)
+from tinxy import TinxyCommandSuperseded, TinxyError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +59,7 @@ class TinxyOptimisticMixin:
             # state the user actually wants. Leave the optimistic value alone
             # for it to resolve, and say nothing.
             return
-        except (TinxyConnectionException, TinxyLocalException) as err:
+        except TinxyError as err:
             self._optimistic = None
             self.async_write_ha_state()
             raise HomeAssistantError(f"{self.name}: {err}") from err

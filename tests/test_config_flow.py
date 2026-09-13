@@ -125,27 +125,31 @@ async def test_user_flow_cannot_connect(hass: HomeAssistant) -> None:
 
 
 @pytest.mark.parametrize(
-    ("status", "fragment"),
+    ("probe", "fragment"),
     [
-        ("wrong_chip_id", "chip id"),
-        ("api_not_available", "Local API not available"),
-        ("connection_error", "Connection error"),
+        ({"chip_id": "99999999"}, "chip id"),
+        ({}, "Local API not available"),
+        ("raise", "Connection error"),
     ],
 )
 async def test_select_device_rejects_bad_ip(
-    hass: HomeAssistant, device_online: AiohttpClientMocker, status: str, fragment: str
+    hass: HomeAssistant, device_online: AiohttpClientMocker, probe, fragment: str
 ) -> None:
     """A wrong or unreachable IP must not silently attach to another device."""
+    from tinxy import TinxyConnectionError
+
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_API_KEY: API_KEY}
     )
-    with patch(
-        "custom_components.tinxylocal.hub.TinxyLocalHub.validate_ip",
-        return_value=status,
-    ):
+    kwargs = (
+        {"side_effect": TinxyConnectionError("unreachable")}
+        if probe == "raise"
+        else {"return_value": probe}
+    )
+    with patch("tinxy.TinxyLocalClient.get_info", **kwargs):
         result = await hass.config_entries.flow.async_configure(
             result["flow_id"], {CONF_DEVICE_ID: DEVICE_ID, CONF_HOST: HOST}
         )
@@ -384,9 +388,7 @@ async def test_lock_gets_a_relay_name_backfilled(
     hass: HomeAssistant, device_online: AiohttpClientMocker
 ) -> None:
     """Locks come back from the cloud with an empty `devices` list."""
-    with patch(
-        "custom_components.tinxylocal.hub.TinxyLocalHub.validate_ip", return_value="ok"
-    ):
+    with patch("tinxy.TinxyLocalClient.get_info", return_value={"chip_id": "5610150"}):
         result = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": config_entries.SOURCE_USER}
         )
@@ -407,10 +409,7 @@ async def test_rejected_token_raises_invalid_auth(hass: HomeAssistant) -> None:
     from custom_components.tinxylocal.config_flow import InvalidAuth, validate_input
 
     with (
-        patch(
-            "custom_components.tinxylocal.hub.TinxyLocalHub.authenticate",
-            return_value=False,
-        ),
+        patch("tinxy.TinxyCloud.verify_token", return_value=False),
         pytest.raises(InvalidAuth),
     ):
         await validate_input(hass, {CONF_API_KEY: API_KEY})

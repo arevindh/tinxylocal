@@ -4,8 +4,8 @@ The RSSI/SSID/IP sensor set comes from the ha-tinxylocal fork by @selvakk2k,
 collapsed here into one description-driven class and with RSSI disabled by
 default, since it changes on nearly every poll and fills the recorder database.
 
-Everything here is read straight out of `coordinator.device_metadata`, which the
-coordinator already fills on every poll from the device's `/info` response.
+Every value comes from the `DeviceStatus` the coordinator already fetches, so
+these cost no extra requests.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 class TinxySensorDescription(SensorEntityDescription):
     """Describes a Tinxy diagnostic sensor and how to read it from metadata."""
 
-    value_fn: Callable[[dict[str, Any]], Any]
+    value_fn: Callable[[Any], Any]
 
 
 SENSORS: tuple[TinxySensorDescription, ...] = (
@@ -48,17 +48,17 @@ SENSORS: tuple[TinxySensorDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
         entity_registry_enabled_default=False,
-        value_fn=lambda metadata: metadata.get("rssi"),
+        value_fn=lambda status: status.rssi,
     ),
     TinxySensorDescription(
         key="ssid",
         name="Wi-Fi network",
-        value_fn=lambda metadata: metadata.get("ssid"),
+        value_fn=lambda status: status.ssid,
     ),
     TinxySensorDescription(
         key="ip",
         name="IP address",
-        value_fn=lambda metadata: metadata.get("ip"),
+        value_fn=lambda status: status.ip,
     ),
 )
 
@@ -100,27 +100,31 @@ class TinxyDiagnosticSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the last poll succeeded and this node reported data."""
+        """Return True if the last poll succeeded and this device reported data."""
         return (
             self.coordinator.last_update_success
-            and self.node_id in self.coordinator.device_metadata
+            and self.node_id in (self.coordinator.data or {})
         )
+
+    @property
+    def _status(self):
+        """Return this device's last reported status, if any."""
+        return (self.coordinator.data or {}).get(self.node_id)
 
     @property
     def device_info(self) -> DeviceInfo:
         """Attach to the same device the switches and fans belong to."""
-        metadata = self.coordinator.device_metadata.get(self.node_id, {})
+        status = self._status
         return DeviceInfo(
             identifiers={(DOMAIN, self.node_id)},
             name=self._node_name,
             manufacturer="Tinxy",
-            model=metadata.get("model", "Smart Device"),
-            sw_version=metadata.get("firmware", "Unknown"),
+            model=status.model if status else None,
+            sw_version=status.firmware if status else None,
         )
 
     @property
     def native_value(self) -> Any:
         """Return the current value."""
-        return self.entity_description.value_fn(
-            self.coordinator.device_metadata.get(self.node_id, {})
-        )
+        status = self._status
+        return self.entity_description.value_fn(status) if status else None

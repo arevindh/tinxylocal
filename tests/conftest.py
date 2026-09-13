@@ -22,13 +22,13 @@ def auto_enable_custom_integrations(enable_custom_integrations):
 
 @pytest.fixture(autouse=True)
 def no_command_spacing() -> Generator[None]:
-    """Drop the 1s command floor and the settle delay so tests are not slow.
+    """Drop the command spacing and settle delay so tests are not slow.
 
-    The spacing is a device protocol constraint, not integration logic, and it
-    is covered directly in test_hub.py.
+    The spacing is a device constraint enforced by the tinxy package, and is
+    covered by that package's own tests rather than here.
     """
     with (
-        patch("custom_components.tinxylocal.hub.DEFAULT_RATE_LIMIT_DELAY", 0),
+        patch("tinxy.local.MIN_COMMAND_SPACING", 0),
         patch("custom_components.tinxylocal.entity.SETTLE_DELAY", 0),
     ):
         yield
