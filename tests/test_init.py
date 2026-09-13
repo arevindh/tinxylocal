@@ -167,3 +167,54 @@ async def test_a_device_reporting_only_a_relay_count_still_works(
     entities = er.async_entries_for_config_entry(registry, entry.entry_id)
     # the single relay is fan hardware per features, and takes the device's name
     assert any(e.domain == "fan" for e in entities), [e.entity_id for e in entities]
+
+
+async def test_doubled_entity_ids_are_repaired(
+    hass: HomeAssistant, device_online: AiohttpClientMocker
+) -> None:
+    """Upgrading from 2.x produced ids with the device name twice.
+
+    The entity keeps its unique_id, so history follows it to the corrected id.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=ENTRY_DATA, unique_id=CHIP_ID, title="Hall"
+    )
+    entry.add_to_hass(hass)
+
+    registry = er.async_get(hass)
+    broken = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        f"{DEVICE_ID}_ip",
+        config_entry=entry,
+        original_name="IP address",
+        has_entity_name=True,
+        suggested_object_id="hall_hall_ip_address",
+    )
+    assert broken.entity_id == "sensor.hall_hall_ip_address"
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get("sensor.hall_hall_ip_address") is None
+    fixed = registry.async_get("sensor.hall_ip_address")
+    assert fixed is not None
+    # same unique_id, so recorder history carries across
+    assert fixed.unique_id == f"{DEVICE_ID}_ip"
+
+
+async def test_repair_leaves_correct_ids_alone(
+    hass: HomeAssistant, loaded_entry: MockConfigEntry
+) -> None:
+    """A fresh install must not be touched by the repair."""
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    ids = {
+        e.entity_id
+        for e in er.async_entries_for_config_entry(registry, loaded_entry.entry_id)
+    }
+    assert "sensor.hall_ip_address" in ids
+    assert not any(".hall_hall_" in i for i in ids)

@@ -7,7 +7,9 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import slugify
 
 from .const import (
     CONF_DEVICE,
@@ -72,6 +74,39 @@ def _relays(device: dict) -> list[dict]:
     ]
 
 
+def _async_repair_doubled_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Strip a duplicated device name from generated entity ids.
+
+    Upgrading from 2.x produced ids like `sensor.hall_hall_ip_address`: the
+    device name appears twice. Fresh installs are unaffected, and the displayed
+    name, state and history were always correct, so this is cosmetic. The cause
+    sits in how Home Assistant derived the id during that particular upgrade and
+    has not been reproduced outside it, so this repairs the result rather than
+    the cause.
+
+    Only entities this integration created are touched, only where the doubled
+    prefix is actually present, and only when the corrected id is free.
+    """
+    registry = er.async_get(hass)
+    for item in er.async_entries_for_config_entry(registry, entry.entry_id):
+        device = registry.async_get(item.entity_id)
+        if not device or not item.has_entity_name:
+            continue
+
+        domain, _, object_id = item.entity_id.partition(".")
+        entry_title = slugify(entry.title)
+        doubled = f"{entry_title}_{entry_title}_"
+        if not object_id.startswith(doubled):
+            continue
+
+        fixed = f"{domain}.{object_id.replace(doubled, f'{entry_title}_', 1)}"
+        if registry.async_get(fixed):
+            continue
+
+        _LOGGER.info("Renaming %s to %s", item.entity_id, fixed)
+        registry.async_update_entity(item.entity_id, new_entity_id=fixed)
+
+
 def _async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Bring entries created before 3.0.0 up to date, in place.
 
@@ -99,6 +134,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> boo
     """Set up Tinxy from a config entry."""
 
     _async_migrate_entry(hass, entry)
+    _async_repair_doubled_entity_ids(hass, entry)
 
     web_session = async_get_clientsession(hass)
 
