@@ -1,13 +1,10 @@
-"""Pure-Python XXTEA encryption for Tinxy local device communication.
+"""Local authentication token for Tinxy devices.
 
 Adapted from the ha-tinxylocal fork by @selvakk2k
-(https://github.com/selvakk2k/ha-tinxylocal), which established that the Tinxy
-local auth token can be produced in pure Python and removed the need for the
-bundled Go binaries this integration used to ship.
-
-Output is byte-identical to the retired `tinxy-cli`: verified across 319 cases
-covering key lengths either side of the 16-byte boundary and timestamps either
-side of the 4-byte block boundary. See test_crypto.py for the pinned vector.
+(https://github.com/selvakk2k/ha-tinxylocal), which established that this could be
+done in pure Python and removed the need for the compiled Go helper that earlier
+versions shipped. Output is verified identical to that helper; test_crypto.py pins
+a known vector.
 """
 
 from __future__ import annotations

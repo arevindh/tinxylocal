@@ -16,16 +16,12 @@ TINXY_BACKEND = "https://backend.tinxy.in/"
 # tightening polling would push slow or weak-signal devices into unavailable.
 DEFAULT_REQUEST_TIMEOUT = 5
 DEFAULT_POLLING_INTERVAL = 6
-# Spacing between commands to one device. This is a protocol floor, not a comfort
-# setting: the auth token encrypts a unix timestamp in WHOLE SECONDS, and the device
-# rejects any timestamp that does not exceed the highest one it has already seen.
-# Two commands inside the same second therefore cannot both be authenticated, and
-# the limit is per DEVICE, not per relay. Verified on WIFI_2SWITCH_V1 firmware 82:
-# a second command 0.25s later on a different relay returns HTTP 400.
-# Going faster only appears to work by dating the timestamp into the future, which
-# the device accepts but then treats as its new high-water mark, locking out every
-# honestly-dated command until real time catches up. Measured: sending now+30
-# rendered the device unresponsive to normal commands for the next 30 seconds.
+# Spacing between commands to one device. This is a floor imposed by the device,
+# not a comfort setting: it accepts at most one command per second, and the limit
+# is per DEVICE rather than per relay. Verified on WIFI_2SWITCH_V1 firmware 82: a
+# second command a quarter of a second later on a different relay is refused.
+# Sending faster does not work and can leave a device refusing commands for a
+# while afterwards, so do not lower this to match other integrations.
 DEFAULT_RATE_LIMIT_DELAY = 1.0
 
 CONF_ACTION = "action"

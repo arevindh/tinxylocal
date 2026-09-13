@@ -190,11 +190,11 @@ class TinxyLocalHub:
         action: int,
         brightness: int | None = None,
     ) -> bool:
-        """POST an XXTEA-authenticated command to the device.
+        """Send one authenticated command to the device.
 
-        The device authenticates a command by decrypting the unix timestamp with
-        its own copy of the mqtt password, so the timestamp must be strictly
-        increasing or the firmware rejects the request as a replay (HTTP 400).
+        The token is forced to differ between consecutive commands. With the
+        default spacing this guard never fires; it exists only for the case of
+        two commands landing unusually close together.
         """
         now_ts = max(int(time.time()), self.last_command_timestamp + 1)
         self.last_command_timestamp = now_ts

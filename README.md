@@ -166,17 +166,13 @@ Open the device, then **⋮ → Reconfigure** (or the **Configure** button) to c
 | Command spacing | `1s` | Minimum gap between commands to one device. See below |
 
 > [!WARNING]
-> **One second is the floor, not a preference.** A Tinxy device authenticates each command
-> against an encrypted timestamp measured in **whole seconds**, and refuses any timestamp it
-> has already seen. Two commands in the same second cannot both be accepted, and this applies
-> **per device, not per switch**: toggling two relays on the same unit back to back is exactly
-> the case that fails.
+> **One second is the floor, not a preference.** A device accepts at most one command per
+> second, and that limit applies **per device, not per switch**: toggling two relays on the
+> same unit back to back is exactly the case that fails. This is why the setting will not go
+> lower. Raise it if a device is unreliable; do not try to work around it.
 >
-> This is why the setting will not go below 1 second. Raise it if a device is unreliable,
-> never try to work around it.
->
-> Only commands are affected. Status polling uses a separate, unauthenticated read and stays
-> as responsive as your polling interval allows.
+> Only commands are affected. Status polling is a separate, unrestricted read and stays as
+> responsive as your polling interval allows.
 
 ---
 
@@ -256,24 +252,18 @@ delete `custom_components/tinxylocal/` from your configuration directory and res
 
 ## How it works
 
-**Status** is read by polling `GET /info` on each device, which returns relay states, per relay
-brightness, signal strength and firmware details. Reads are unauthenticated and unrestricted,
-so polling is fast and is **not** affected by the command spacing described below.
+**Status** is read with a plain, unauthenticated request that returns relay states, per
+relay brightness, signal strength and firmware details. Reads are unrestricted, so
+polling is fast and is not affected by the command spacing below.
 
-**Commands** are sent as `POST /toggle`. The device authenticates each one by decrypting a
-timestamp encrypted with its own copy of your device key, using XXTEA.
+**Commands** are authenticated, and a device accepts at most **one per second**. That
+limit is per device, not per relay, which is why the setting will not go lower and why
+toggling two relays on the same unit takes about two seconds. Commands are queued and
+spaced automatically; reads are not queued.
 
-That timestamp is in whole seconds and must **exceed every timestamp the device has already
-accepted**. The device stores that high-water mark, which has two consequences: only one
-command per second per device can succeed, and dating a timestamp into the future to get
-around it locks out honestly-dated commands until real time catches up. Commands to a device
-are therefore queued and spaced at least a second apart rather than sent in parallel.
-
-Earlier versions shelled out to a bundled Go program for this, shipping five compiled binaries
-for different CPU architectures. That is now about 70 lines of Python using nothing outside the
-standard library, producing byte-identical output.
-
----
+Earlier versions shelled out to a bundled Go program for this, shipping five compiled
+binaries for different CPU architectures. That is now about 70 lines of Python using
+nothing outside the standard library, producing identical output.
 
 ## Credits
 
@@ -292,12 +282,12 @@ before release. Nothing here was merged unreviewed.
 
 Parts of this integration come from the [ha-tinxylocal](https://github.com/selvakk2k/ha-tinxylocal)
 fork by [@selvakk2k](https://github.com/selvakk2k), which showed that the local authentication
-token could be produced in pure Python and so made the bundled Go binaries unnecessary. Their work
-is the basis of:
+could be done in pure Python and so made the bundled Go binaries unnecessary. Their work is the
+basis of:
 
-- `crypto.py`, the XXTEA implementation, adapted directly
+- `crypto.py`, the local authentication, adapted directly
 - the diagnostic sensor set, reworked here into one description-driven class
 - the optimistic-update approach for instant dashboard feedback
-- the replay-protection guard and `Connection: close` handling
+- the command-spacing guard and `Connection: close` handling
 
 Licensed under the terms in [LICENSE](LICENSE).
