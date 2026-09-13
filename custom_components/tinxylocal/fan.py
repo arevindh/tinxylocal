@@ -1,17 +1,16 @@
 """Fan platform for Tinxy integration."""
 
 import logging
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.fan import FanEntity, FanEntityFeature
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import TinxyUpdateCoordinator
+from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 from .entity import TinxyOptimisticMixin
 from .hub import TinxyLocalHub
 
@@ -22,13 +21,13 @@ SPEED_LEVELS = [33, 66, 100]
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: TinxyConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Tinxy fans based on a config entry."""
-    coordinator = cast(
-        TinxyUpdateCoordinator, hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    )
-    hubs = hass.data[DOMAIN][entry.entry_id]["hubs"]
+    coordinator = entry.runtime_data
+    hubs = coordinator.hubs
 
     # Skip creating fans if this is a lock device
     device_data = entry.data["device"]
@@ -73,13 +72,13 @@ async def async_setup_entry(
             has_fan_feature = index < len(features) and "FAN" in features[index]
             if has_fan_feature:
                 relay_number = index + 1
-                entity_name = f"{node_name} {device_name_str}"
                 fan = TinxyFan(
                     coordinator=coordinator,
                     hub=hubs[0],
                     node_id=node["device_id"],
                     relay_number=relay_number,
-                    name=entity_name,
+                    device_name=node_name,
+                    name=device_name_str,
                     device_type=device_type,
                 )
                 fans.append(fan)
@@ -89,6 +88,9 @@ async def async_setup_entry(
 
 class TinxyFan(TinxyOptimisticMixin, CoordinatorEntity, FanEntity):
     """Representation of a Tinxy fan."""
+
+    # Bronze `has-entity-name`: Home Assistant composes "<device> <entity>".
+    _attr_has_entity_name = True
 
     _attr_supported_features = (
         FanEntityFeature.SET_SPEED
@@ -102,6 +104,7 @@ class TinxyFan(TinxyOptimisticMixin, CoordinatorEntity, FanEntity):
         hub: TinxyLocalHub,
         node_id: str,
         relay_number: int,
+        device_name: str,
         name: str,
         device_type: str,
     ) -> None:
@@ -112,6 +115,7 @@ class TinxyFan(TinxyOptimisticMixin, CoordinatorEntity, FanEntity):
         self.node_id = node_id
         self.relay_number = relay_number
         self._attr_name = name
+        self._device_name = device_name
         self._attr_unique_id = f"{node_id}_{relay_number}_fan"
         self._device_type = device_type
         self._attr_speed_count = len(SPEED_LEVELS)
@@ -136,13 +140,9 @@ class TinxyFan(TinxyOptimisticMixin, CoordinatorEntity, FanEntity):
     def device_info(self) -> DeviceInfo | None:
         """Return device information to associate entities with the device."""
         metadata = self.coordinator.device_metadata.get(self.node_id, {})
-        device_name = (
-            self._attr_name.split(" ")[0] if self._attr_name else "Unknown Device"
-        )
-
         return {
             "identifiers": {(DOMAIN, self.node_id)},
-            "name": device_name,
+            "name": self._device_name,
             "manufacturer": "Tinxy",
             "model": metadata.get("model", "Smart Device"),
             "sw_version": metadata.get("firmware", "Unknown"),

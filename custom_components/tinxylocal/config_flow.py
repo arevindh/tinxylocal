@@ -50,13 +50,6 @@ STEP_DEVICE_DATA_SCHEMA = vol.Schema(
 )
 
 
-async def validate_device(hass: HomeAssistant, host_ip, chip_id) -> dict[str, Any]:
-    """Validate the device IP and selected device."""
-    web_session = async_get_clientsession(hass)
-    hub = TinxyLocalHub(hass, host_ip)
-    return hub.validate_ip(web_session, host_ip, chip_id)
-
-
 async def read_devices(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
     """Read Device List."""
     web_session = async_get_clientsession(hass)
@@ -225,15 +218,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=STEP_CHOOSE_TOKEN_SCHEMA,
             )
 
-        # If the user chooses to use the existing token, proceed to device selection
-        if user_input and "token_choice" in user_input:
-            if user_input["token_choice"] == "existing":
-                return await self.async_step_select_device()
-
-            # If the user chooses to enter a new token, proceed to API key entry
-            return self.async_show_form(
-                step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
-            )
+        # A choose_token submission is routed to async_step_choose_token by
+        # Home Assistant, so it never comes back through this step.
 
         # Handle API key submission
         if user_input and CONF_API_KEY in user_input:

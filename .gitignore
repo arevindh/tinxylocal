@@ -4,3 +4,5 @@ build.md
 venv
 __pycache__/
 CLAUDE.md
+.pytest_cache/
+.coverage

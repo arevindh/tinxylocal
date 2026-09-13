@@ -1,17 +1,16 @@
 """Lock platform for Tinxy integration."""
 
 import logging
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.lock import LockEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import TinxyUpdateCoordinator
+from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 from .entity import TinxyOptimisticMixin
 from .hub import TinxyLocalHub
 
@@ -19,13 +18,13 @@ _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: TinxyConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Tinxy locks based on a config entry."""
-    coordinator = cast(
-        TinxyUpdateCoordinator, hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    )
-    hubs = hass.data[DOMAIN][entry.entry_id]["hubs"]
+    coordinator = entry.runtime_data
+    hubs = coordinator.hubs
 
     locks = []
     device_data = entry.data["device"]
@@ -33,14 +32,13 @@ async def async_setup_entry(
     # Check if this is a lock device based on the typeId
     if device_data.get("typeId", {}).get("gtype") == "action.devices.types.LOCK":
         for node in coordinator.nodes:
-            device_name = node["name"]
             # For lock devices, create a single lock entity
             lock = TinxyLock(
                 coordinator=coordinator,
                 hub=hubs[0],
                 node_id=node["device_id"],
                 relay_number=1,  # Locks typically use relay 1
-                name=device_name,
+                device_name=node["name"],
                 device_data=device_data,
             )
             locks.append(lock)
@@ -51,13 +49,18 @@ async def async_setup_entry(
 class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
     """Representation of a Tinxy lock."""
 
+    # Bronze `has-entity-name`. The lock is the device's only entity, so it takes
+    # the device's own name: `_attr_name = None` is how HA expresses that.
+    _attr_has_entity_name = True
+    _attr_name = None
+
     def __init__(
         self,
         coordinator: TinxyUpdateCoordinator,
         hub: TinxyLocalHub,
         node_id: str,
         relay_number: int,
-        name: str,
+        device_name: str,
         device_data: dict,
     ) -> None:
         """Initialize the Tinxy lock."""
@@ -66,7 +69,7 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
         self.hub = hub
         self.node_id = node_id
         self.relay_number = relay_number
-        self._attr_name = name
+        self._device_name = device_name
         self._attr_unique_id = f"{node_id}_lock"
         self._device_data = device_data
         self._attr_supported_features = 0  # Basic lock/unlock only
@@ -94,7 +97,7 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
         
         return {
             "identifiers": {(DOMAIN, self.node_id)},
-            "name": self._attr_name,
+            "name": self._device_name,
             "manufacturer": "Tinxy",
             "model": self._device_data.get("typeId", {}).get("long_name", "Smart Lock"),
             "sw_version": metadata.get("firmware", str(self._device_data.get("firmwareVersion", "Unknown"))),
@@ -195,7 +198,9 @@ class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
         # For most door locks, there's no explicit "lock" command
         # The lock automatically locks after a timeout
         # This method exists for Home Assistant compatibility but may not do anything
-        _LOGGER.info("Lock command sent to %s (may not be supported by device)", self._attr_name)
+        _LOGGER.info(
+            "Lock command sent to %s (may not be supported by device)", self._device_name
+        )
 
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock the device."""

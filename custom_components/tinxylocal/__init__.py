@@ -9,8 +9,18 @@ from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_DEVICE, CONF_DEVICE_ID, CONF_MQTT_PASS, CONF_POLLING_INTERVAL, CONF_RATE_LIMIT_DELAY, CONF_REQUEST_TIMEOUT, DEFAULT_POLLING_INTERVAL, DEFAULT_RATE_LIMIT_DELAY, DEFAULT_REQUEST_TIMEOUT, DOMAIN
-from .coordinator import TinxyUpdateCoordinator
+from .const import (
+    CONF_DEVICE,
+    CONF_DEVICE_ID,
+    CONF_MQTT_PASS,
+    CONF_POLLING_INTERVAL,
+    CONF_RATE_LIMIT_DELAY,
+    CONF_REQUEST_TIMEOUT,
+    DEFAULT_POLLING_INTERVAL,
+    DEFAULT_RATE_LIMIT_DELAY,
+    DEFAULT_REQUEST_TIMEOUT,
+)
+from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
@@ -47,10 +57,8 @@ def _async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         hass.config_entries.async_update_entry(entry, **updates)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> bool:
     """Set up Tinxy from a config entry."""
-
-    hass.data.setdefault(DOMAIN, {})
 
     _async_migrate_entry(hass, entry)
 
@@ -96,26 +104,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Initialize the coordinator with the list of nodes and web session
     coordinator = TinxyUpdateCoordinator(
-        hass, nodes, web_session, hubs, polling_interval
+        hass, entry, nodes, web_session, hubs, polling_interval
     )
 
-    # Store the coordinator and hubs in Home Assistant's data store
-    hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator, "hubs": hubs}
+    # Bronze `test-before-setup`: fail setup with ConfigEntryNotReady if the
+    # device cannot be reached, so Home Assistant retries instead of bringing up
+    # a config entry whose entities never had any data.
+    await coordinator.async_config_entry_first_refresh()
 
-    # Forward the entry setup to the platforms
+    entry.runtime_data = coordinator
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> bool:
     """Unload a config entry."""
-    # Shutdown all hubs to stop background workers
-    hubs = hass.data[DOMAIN][entry.entry_id]["hubs"]
-    for hub in hubs:
-        await hub.shutdown()
-    
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        # Stop the per-device command workers.
+        for hub in entry.runtime_data.hubs:
+            await hub.shutdown()
     return unload_ok

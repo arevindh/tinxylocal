@@ -8,10 +8,10 @@
   "description": "Integration for Tinxy Local devices.",
   "dependencies": [],
   "documentation": "https://github.com/arevindh/tinxylocal/blob/main/README.md",
+  "integration_type": "device",
   "issue_tracker": "https://github.com/arevindh/tinxylocal/issues",
-  "homekit": {},
   "iot_class": "local_polling",
-  "ssdp": [],
+  "requirements": [],
   "zeroconf": [
     {
       "name": "tinxy*",

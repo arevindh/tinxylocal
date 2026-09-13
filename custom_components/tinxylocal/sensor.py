@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -20,7 +20,6 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
     EntityCategory,
@@ -31,7 +30,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import TinxyUpdateCoordinator
+from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -65,12 +64,12 @@ SENSORS: tuple[TinxySensorDescription, ...] = (
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: TinxyConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Tinxy diagnostic sensors based on a config entry."""
-    coordinator = cast(
-        TinxyUpdateCoordinator, hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    )
+    coordinator = entry.runtime_data
 
     async_add_entities(
         TinxyDiagnosticSensor(coordinator, node, description)

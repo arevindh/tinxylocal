@@ -4,6 +4,7 @@ from datetime import timedelta
 import logging
 from typing import Any
 
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -13,6 +14,10 @@ from .hub import TinxyConnectionException, TinxyLocalException, TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 REQUEST_REFRESH_DELAY = 0.50
+
+# Bronze `runtime-data`: the coordinator lives on the entry, not in hass.data.
+# It owns the hubs, so it is the only thing the platforms need.
+type TinxyConfigEntry = ConfigEntry[TinxyUpdateCoordinator]
 
 
 class TinxyUpdateCoordinator(DataUpdateCoordinator):
@@ -24,6 +29,7 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
     def __init__(
         self,
         hass: HomeAssistant,
+        config_entry: ConfigEntry,
         nodes: list[dict[str, Any]],
         web_session,
         hubs: list[TinxyLocalHub],
@@ -34,6 +40,7 @@ class TinxyUpdateCoordinator(DataUpdateCoordinator):
             hass,
             _LOGGER,
             name="Tinxy Nodes",
+            config_entry=config_entry,
             update_interval=timedelta(seconds=default_polling_interval),
         )
         self.hass = hass
