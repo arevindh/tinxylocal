@@ -12,7 +12,7 @@ from custom_components.tinxylocal.const import (
     DOMAIN,
 )
 
-from .const import CHIP_ID, ENTRY_DATA, INFO_URL
+from .const import CHIP_ID, DEVICE_ID, ENTRY_DATA, INFO_URL
 
 
 async def test_setup_and_unload(
@@ -91,3 +91,79 @@ async def test_options_are_applied_to_the_client(
     # the coordinator must poll through the same clients the platforms command
     assert coordinator.clients[0].request_timeout == 9
     assert coordinator.clients[0].command_spacing == 3
+
+
+async def test_a_2x_entry_still_produces_its_entities(
+    hass: HomeAssistant, device_online: AiohttpClientMocker
+) -> None:
+    """An entry written by 2.x must load unchanged on the library version.
+
+    2.x stored the raw cloud payload and no unique_id. Nothing rewrites that
+    payload, so the only thing standing between it and working entities is
+    `_relays()` reading the same shape the old code wrote.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=ENTRY_DATA, unique_id=None, title="Hall"
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert entry.unique_id == CHIP_ID
+    registry = er.async_get(hass)
+    ids = {
+        e.unique_id
+        for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+    }
+    # both relays, plus the three diagnostics
+    assert f"{DEVICE_ID}_1" in ids
+    assert f"{DEVICE_ID}_2" in ids
+    assert len(ids) == 5
+    assert hass.states.get("switch.hall_led").state == "off"
+
+
+async def test_a_device_reporting_only_a_relay_count_still_works(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Some units report no relay names or types, only numberOfRelays.
+
+    Without the count as a fallback this device yields no relays, and therefore
+    no entities at all.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    from .const import CLOUD_DEVICE, DEVICE_INFO, HOST
+
+    bare = {
+        **CLOUD_DEVICE,
+        "_id": "61c40356a4b87e0012a653f5",
+        "name": "Arjunaa Fan",
+        "devices": [],
+        "deviceTypes": [],
+        "uuidRef": {"uuid": "9627678"},
+        "typeId": {
+            "name": "WIFI_SWITCH_1FAN_V1",
+            "gtype": "action.devices.types.SWITCH",
+            "features": ["SWITCH|FAN"],
+            "numberOfRelays": 1,
+        },
+    }
+    aioclient_mock.get(f"http://{HOST}/info", json={**DEVICE_INFO, "state": "1"})
+    aioclient_mock.post(f"http://{HOST}/toggle", json={})
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={**ENTRY_DATA, "device": bare},
+        unique_id="9627678",
+        title="Arjunaa Fan",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    entities = er.async_entries_for_config_entry(registry, entry.entry_id)
+    # the single relay is fan hardware per features, and takes the device's name
+    assert any(e.domain == "fan" for e in entities), [e.entity_id for e in entities]
