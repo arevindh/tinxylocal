@@ -7,7 +7,9 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.util import slugify
 
 from .const import (
     CONF_DEVICE,
@@ -32,6 +34,40 @@ PLATFORMS: list[Platform] = [
     Platform.LOCK,
     Platform.SENSOR,
 ]
+
+
+def _async_repair_doubled_entity_ids(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Strip a duplicated device name from generated entity ids.
+
+    Upgrading from 2.x produced ids like `sensor.hall_hall_ip_address`: the
+    device name appears twice. Fresh installs are unaffected. On one instance,
+    same version, a device added fresh got `sensor.hub_ip_address` while three
+    upgraded ones doubled, so it is specific to that upgrade rather than to the
+    sensor code.
+
+    It has not been reproduced outside a real upgraded instance, so this repairs
+    the result rather than the cause. The rename keeps the unique_id, so recorder
+    history follows the entity. Only entities this integration created are
+    touched, only where the doubled prefix is present, and only when the
+    corrected id is free.
+    """
+    registry = er.async_get(hass)
+    for item in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if not item.has_entity_name:
+            continue
+
+        domain, _, object_id = item.entity_id.partition(".")
+        prefix = slugify(entry.title)
+        doubled = f"{prefix}_{prefix}_"
+        if not object_id.startswith(doubled):
+            continue
+
+        fixed = f"{domain}.{object_id.replace(doubled, f'{prefix}_', 1)}"
+        if registry.async_get(fixed):
+            continue
+
+        _LOGGER.info("Renaming %s to %s", item.entity_id, fixed)
+        registry.async_update_entity(item.entity_id, new_entity_id=fixed)
 
 
 def _async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -61,6 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> boo
     """Set up Tinxy from a config entry."""
 
     _async_migrate_entry(hass, entry)
+    _async_repair_doubled_entity_ids(hass, entry)
 
     web_session = async_get_clientsession(hass)
 
