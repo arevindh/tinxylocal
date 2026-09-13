@@ -16,15 +16,25 @@
         "data": {
           "token_choice": "Token Option"
         }
+      },
+      "zeroconf_confirm": {
+        "title": "Discovered Tinxy device",
+        "description": "A Tinxy device was found at {host} (chip {chip_id}).\n\nEnter your Tinxy API key to match it against your account and add it.",
+        "data": {
+          "api_key": "API Key"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid authentication",
-      "unknown": "Unexpected error"
+      "unknown": "Unexpected error",
+      "device_not_in_account": "That device is not in the Tinxy account this API key belongs to."
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Device is already configured",
+      "api_not_available": "The device answered but its local API is not enabled.",
+      "cannot_connect": "Failed to connect"
     }
   },
   "options": {
@@ -36,13 +46,15 @@
           "host": "Device IP Address",
           "api_key": "API Key",
           "request_timeout": "Request Timeout",
-          "polling_interval": "Polling Interval"
+          "polling_interval": "Polling Interval",
+          "rate_limit_delay": "Command spacing"
         },
         "data_description": {
           "host": "Local IP address of the Tinxy device",
           "api_key": "Leave unchanged if not updating",
           "request_timeout": "Timeout in seconds for HTTP requests to Tinxy devices. Default is 3 seconds.",
-          "polling_interval": "How often to poll devices for status updates in seconds. Default is 6 seconds. Must be ≥ request timeout."
+          "polling_interval": "How often to poll devices for status updates in seconds. Default is 6 seconds. Must be ≥ request timeout.",
+          "rate_limit_delay": "Minimum gap between commands to one device. Default is 1 second, which is the fastest the device's authentication allows: its token encrypts a whole-second timestamp, so two commands in the same second cannot both be accepted. This applies per device, not per switch. Raise it if a device stops responding."
         }
       }
     },

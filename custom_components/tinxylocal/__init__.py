@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import stat
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -11,24 +9,42 @@ from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_DEVICE, CONF_MQTT_PASS, CONF_POLLING_INTERVAL, CONF_REQUEST_TIMEOUT, DEFAULT_POLLING_INTERVAL, DEFAULT_REQUEST_TIMEOUT, DOMAIN
+from .const import CONF_DEVICE, CONF_DEVICE_ID, CONF_MQTT_PASS, CONF_POLLING_INTERVAL, CONF_RATE_LIMIT_DELAY, CONF_REQUEST_TIMEOUT, DEFAULT_POLLING_INTERVAL, DEFAULT_RATE_LIMIT_DELAY, DEFAULT_REQUEST_TIMEOUT, DOMAIN
 from .coordinator import TinxyUpdateCoordinator
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 
 # List the platforms that this integration will support.
-PLATFORMS: list[Platform] = [Platform.SWITCH, Platform.FAN, Platform.LOCK]
+PLATFORMS: list[Platform] = [
+    Platform.SWITCH,
+    Platform.FAN,
+    Platform.LOCK,
+    Platform.SENSOR,
+]
 
 
-def _set_executable_permissions(directory: str):
-    """Ensure all files in the directory are executable."""
-    for root, _, files in os.walk(directory):
-        for file in files:
-            file_path = os.path.join(root, file)
-            if not os.access(file_path, os.X_OK):
-                current_perms = os.stat(file_path).st_mode
-                os.chmod(file_path, current_perms | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+def _async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Bring entries created before 3.0.0 up to date, in place.
+
+    * Entries added before zeroconf existed have no `unique_id`, so discovery
+      cannot tell they are already configured and would offer the same device
+      again as new, producing a duplicate entry and a second set of entities.
+      The chip id has always been stored as `device_id`, so adopt it.
+    """
+    # Only entries predating 3.0.0 lack a unique_id; the config flow always sets
+    # one now, so this is the reliable marker for a legacy entry.
+    if entry.unique_id is not None:
+        return
+
+    updates: dict = {}
+
+    if entry.data.get(CONF_DEVICE_ID):
+        updates["unique_id"] = entry.data[CONF_DEVICE_ID]
+
+    if updates:
+        _LOGGER.info("Migrating Tinxy entry %s: %s", entry.title, sorted(updates))
+        hass.config_entries.async_update_entry(entry, **updates)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -36,13 +52,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     hass.data.setdefault(DOMAIN, {})
 
-    # Set executable permissions for files in the build directory
-    integration_path = hass.config.path("custom_components/tinxylocal/build")
-    if os.path.exists(integration_path):
-        _LOGGER.info("Setting executable permissions for files in %s", integration_path)
-        await hass.async_add_executor_job(_set_executable_permissions, integration_path)
-    else:
-        _LOGGER.warning("Build directory does not exist: %s", integration_path)
+    _async_migrate_entry(hass, entry)
 
     web_session = async_get_clientsession(hass)
 
@@ -51,6 +61,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Get polling interval from options or use default
     polling_interval = entry.options.get(CONF_POLLING_INTERVAL, DEFAULT_POLLING_INTERVAL)
+
+    # Spacing between commands to one device
+    rate_limit_delay = entry.options.get(CONF_RATE_LIMIT_DELAY, DEFAULT_RATE_LIMIT_DELAY)
 
     # Extract device configurations
     device_data = entry.data[CONF_DEVICE]
@@ -76,10 +89,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ]
 
     # Initialize TinxyLocalHub instances for each node
-    hubs = [TinxyLocalHub(hass, node["ip_address"], request_timeout) for node in nodes]
+    hubs = [
+        TinxyLocalHub(hass, node["ip_address"], request_timeout, rate_limit_delay)
+        for node in nodes
+    ]
 
     # Initialize the coordinator with the list of nodes and web session
-    coordinator = TinxyUpdateCoordinator(hass, nodes, web_session, polling_interval)
+    coordinator = TinxyUpdateCoordinator(
+        hass, nodes, web_session, hubs, polling_interval
+    )
 
     # Store the coordinator and hubs in Home Assistant's data store
     hass.data[DOMAIN][entry.entry_id] = {"coordinator": coordinator, "hubs": hubs}

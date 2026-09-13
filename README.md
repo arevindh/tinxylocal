@@ -1,75 +1,303 @@
+# Tinxy Local
 
-# Tinxy Local Home Assistant Integration (Beta) Installation Guide
+[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=flat-square)](https://github.com/hacs/integration)
+[![Version](https://img.shields.io/github/v/release/arevindh/tinxylocal?style=flat-square)](https://github.com/arevindh/tinxylocal/releases)
 
-This guide will help you set up the **tinxy-local** integration for Home Assistant. Since this integration is in beta, please carefully follow each step and be prepared for potential troubleshooting.
+Control **Tinxy smart switches, fan controllers and door locks** directly over your home Wi-Fi
+from Home Assistant. No cloud round trip, no MQTT broker, no polling someone else's server.
 
-Join [Discord server](https://discord.gg/VH4jgz2f) for support.
+Your Tinxy account is used **once, during setup**, to look up each device's local key. After that
+every status read and every command goes straight to the device on your LAN.
 
-## Prerequisites
-
-1. **Home Assistant Community Store (HACS)**: Ensure HACS is installed in your Home Assistant setup. HACS is required to add third-party custom integrations.
-2. **API Key**: Obtain an API key for the tinxy-local integration.
-3. **IP Address**: Ip address of all Tinxy Devices [How to get](discover.md)
-
-## Installation Steps
-
-### Step 1: Install the Tinxy-Local Integration
-
-1. Open the [ tinxy-local GitHub repository ](https://github.com/arevindh/tinxylocal).
-2. **Add to HACS**:
-   - Go to HACS in your Home Assistant UI.
-   - Add the tinxy-local integration by entering the repository URL `https://github.com/arevindh/tinxylocal`.
-   - Follow the prompts to complete the installation.
-   - **Restart Home Assistant** to ensure the new integration loads properly.
-
-### Step 2: Configure Each Device with the Tinxy-Local Integration
-
-For each device you want to add:
-
-1. **Verify Local API Support** (Check Step 3):
-   - Before adding a device, confirm that it supports local access.
-   - Visit `[device_ip]/info` to ensure that local API support is enabled for that specific device.
-2. **Add the Device Using the Tinxy Integration**:
-   - Navigate to **Settings** > **Devices & Services** in Home Assistant.
-   - Click **Add Integration** and search for **tinxy-local**.
-   - When prompted, enter the API key to link the device with the integration (If you have an exising device you can choese to use existing token ).
-
-### Prompt Details for Tinxy Local Integration
-
-When setting up each device with the **tinxy-local** integration, you’ll encounter a series of prompts that guide you through the setup. Here’s what to expect:
-
-1. **API Key Prompt**:
-   - The first prompt will ask you to enter your **API key**.
-   - This key is required to link your Home Assistant instance with your Tinxy account.
-   
-2. **Device Selection Prompt**:
-   - After entering the API key, the integration will retrieve a list of devices associated with your account.
-   - You will be prompted to **select a device** from this list. Choose the specific device you wish to configure.
-   - Next need to enter the **IP address** of the selected device in the **Host** column.
-   - This IP should be the local IP address of the device on your network (Adding will fail if the device is not correct / Local API is not available), allowing Home Assistant to communicate directly with it over the local API.
-
-These prompts ensure that each device is correctly authenticated, selected, and connected over your local network. Repeat these steps for each additional device you wish to add to Home Assistant.
-
-Repeat this process for each additional device you wish to add.
-
-### Step 3: Verify Local API Connectivity (Prior to Adding Each Device)
-
-1. **Check Device’s Local API Support**:
-   - For each device, visit `[device_ip]/info` to confirm local API support is enabled.
-2. **Local API Connection Troubleshooting**:
-   - If the device fails to toggle or respond correctly, Avoid rapid repeated toggling, as this can cause the local API to freeze, If toggling fails after multiple attempts, try resetting your device.
-
-
-### Step 4: Troubleshooting
-
-1. **Access to Samba**:
-   - Ensure that you have Samba or another file access method enabled to manually modify files if necessary.
-2. **Manual Reset**:
-   - If the integration fails for any device, you may need to manually delete the tinxy-local files:
-     - Access your Home Assistant installation’s `custom_components` directory.
-     - Remove any existing tinxy-local files.
-     - Reboot Home Assistant.
+Join the [Discord server](https://discord.gg/VH4jgz2f) for support.
 
 ---
 
-This guide provides the installation and configuration steps for each device with the tinxy-local integration. Since it’s in beta, you may encounter issues; consult the developer or community for additional support if necessary.
+## Contents
+
+1. [Requirements](#requirements)
+2. [Before you start](#before-you-start)
+3. [Installation](#installation)
+4. [Adding your devices](#adding-your-devices)
+5. [What you get](#what-you-get)
+6. [Settings](#settings)
+7. [Supported hardware](#supported-hardware)
+8. [Upgrading from 2.x](#upgrading-from-2x)
+9. [Troubleshooting](#troubleshooting)
+10. [How it works](#how-it-works)
+
+---
+
+## Requirements
+
+| | |
+|---|---|
+| Home Assistant | 2025.4.0 or newer |
+| Devices | Tinxy devices with **local HTTP control enabled** |
+| Network | Home Assistant and your devices on the same LAN |
+| Dependencies | None. Pure Python, nothing extra installed |
+
+> [!IMPORTANT]
+> **Tinxy EVA bulbs are not supported.** They talk to an EVA hub over a proprietary RF mesh
+> and have no local Wi-Fi address of their own. The `EVA_HUB` itself may appear during
+> discovery: do not add it.
+
+---
+
+## Before you start
+
+### Getting your API token
+
+In the Tinxy mobile app, tap the **menu icon (☰)** and select **API Token**.
+
+### Checking a device supports local control
+
+Visit `http://<device-ip>/info` in a browser. A working device returns something like:
+
+```json
+{"rssi":-60,"ip":"10.0.28.17","version":82,"status":1,"state":"00",
+ "chip_id":"11509299","ssid":"YourWiFi","firmware":82,"model":"WIFI_2SWITCH_V1"}
+```
+
+If you get no response, local control is not enabled on that device and this integration
+cannot use it.
+
+> [!CAUTION]
+> ### Keep your credentials private
+>
+> - **Tinxy API tokens never expire and cannot be revoked from the app.** If one leaks, the only
+>   way to invalidate it is to create a brand new Tinxy account. Never paste one into a GitHub
+>   issue, forum post, or log excerpt.
+> - **Device keys also never expire.** The only way to change one is to remove and re-pair the
+>   physical device in the Tinxy app.
+>
+> Both are stored in Home Assistant's `.storage` directory in plain text, which is normal for
+> Home Assistant but worth knowing.
+
+---
+
+## Installation
+
+### Via HACS (recommended)
+
+1. In Home Assistant, open **HACS**.
+2. Add `https://github.com/arevindh/tinxylocal` as a custom repository, category **Integration**.
+3. Install **Tinxy Local**.
+4. **Restart Home Assistant.**
+
+### Manually
+
+Copy `custom_components/tinxylocal/` into your Home Assistant `config/custom_components/`
+directory, then restart.
+
+---
+
+## Adding your devices
+
+Each device is added as its own entry. Repeat for each one you want in Home Assistant.
+
+### Automatic discovery
+
+Tinxy devices announce themselves over mDNS, so Home Assistant usually finds them on its own.
+Look for a **Discovered Tinxy device** card under
+**Settings → Devices & Services**, enter your API token, and submit. The integration matches
+the device against your account and fetches its local key for you.
+
+If you have already added one device, the token is remembered and discovery becomes a single
+click for the rest.
+
+### Manual setup
+
+If discovery does not find a device (some networks block mDNS across VLANs):
+
+1. Go to **Settings → Devices & Services → Add Integration**.
+2. Search for **Tinxy Local**.
+3. Enter your API token, or reuse a saved one.
+4. Pick the device from the list and enter its **local IP address**.
+
+Setup fails deliberately if the IP does not belong to the device you selected, so a typo
+cannot silently attach you to the wrong switch.
+
+> [!TIP]
+> Give your Tinxy devices static DHCP leases on your router. If an address does change,
+> discovery will pick up the new one automatically and update the existing entry.
+
+---
+
+## What you get
+
+### Controls
+
+| Device type | Entity | Behaviour |
+|---|---|---|
+| Switch / socket / light | `switch` | On / off |
+| Fan | `fan` | On / off plus three speeds (33%, 66%, 100%) |
+| Door lock | `lock` | Unlock pulse. The device re-locks on its own timer |
+
+Switches respond immediately in the dashboard: the new state shows at once while the command
+is on its way, then reconciles with whatever the device actually reports.
+
+### Diagnostics
+
+Every device also gets three diagnostic sensors:
+
+| Sensor | Default |
+|---|---|
+| IP address | Enabled |
+| Wi-Fi network (SSID) | Enabled |
+| Wi-Fi signal (dBm) | **Disabled** |
+
+Wi-Fi signal is disabled on purpose. It changes on almost every poll, so leaving it on writes
+a large number of rows to your recorder database for very little benefit. Enable it from the
+device page if you are chasing down a signal problem.
+
+---
+
+## Settings
+
+Open the device, then **⋮ → Reconfigure** (or the **Configure** button) to change:
+
+| Setting | Default | What it does |
+|---|---|---|
+| Device IP address | | Where to reach the device |
+| API key | | Used only to re-validate your account |
+| Request timeout | `5s` | How long to wait for a device to answer |
+| Polling interval | `6s` | How often status is refreshed. Must be at least the timeout |
+| Command spacing | `1s` | Minimum gap between commands to one device. See below |
+
+> [!WARNING]
+> **One second is the floor, not a preference.** A Tinxy device authenticates each command
+> against an encrypted timestamp measured in **whole seconds**, and refuses any timestamp it
+> has already seen. Two commands in the same second cannot both be accepted, and this applies
+> **per device, not per switch**: toggling two relays on the same unit back to back is exactly
+> the case that fails.
+>
+> This is why the setting will not go below 1 second. Raise it if a device is unreliable,
+> never try to work around it.
+>
+> Only commands are affected. Status polling uses a separate, unauthenticated read and stays
+> as responsive as your polling interval allows.
+
+---
+
+## Supported hardware
+
+Verified on real devices:
+
+| Model | Verified |
+|---|---|
+| `WIFI_2SWITCH_V1` | Relay control, diagnostics, discovery |
+| `WIFI_3SWITCH_1FAN` | Status and fan speed reporting |
+
+Also supported:
+
+`WIFI_SWITCH` · `WIFI_SWITCH_V2` · `WIFI_SWITCH_V3` · `WIFI_2SWITCH_V3` · `WIFI_4SWITCH` ·
+`WIFI_4SWITCH_V2` · `WIFI_4SWITCH_V3` · `WIFI_6SWITCH_V1` · `WIFI_6SWITCH_V3` ·
+`WIFI_3SWITCH_1FAN_V3` · `WIFI_SWITCH_1FAN_V1` · `Fan` · `WIFI_4DIMMER` · `Dimmable Light` ·
+`WIFI_BULB_WHITE_V1` · `EM_DOOR_LOCK` · `WIRED_DOOR_LOCK` · `WIRED_DOOR_LOCK_V2` ·
+`WIRED_DOOR_LOCK_V3`
+
+Models not listed are not blocked. Any Tinxy device with local HTTP control enabled should
+work. The list above records what has been tested, not a hard limit.
+
+---
+
+## Upgrading from 2.x
+
+Upgrade in place. Your existing devices, entities, history and automations are unchanged.
+
+**What happens automatically:**
+
+- The bundled Go binaries (about 34 MB) are gone. Everything they did is now pure Python.
+- Existing devices are tagged with their chip ID so discovery recognises them instead of
+  offering them again as new.
+- Command spacing is unchanged at `1s`, and is now adjustable in settings.
+
+**Two changes you will notice:**
+
+1. **Unreachable devices now show as unavailable** instead of displaying their last known
+   state forever. If a device was quietly dropping offline before, you will start seeing it.
+2. **Failed commands now report an error** in the interface rather than failing silently.
+
+Neither is a regression. Both make problems visible that were previously hidden.
+
+---
+
+## Troubleshooting
+
+### The device does not appear during discovery
+
+Check `http://<device-ip>/info` in a browser first. No response means local control is not
+enabled on the device. If `/info` works but discovery does not find it, mDNS is probably
+blocked between Home Assistant and the device: use manual setup instead.
+
+### "Device rejected the request (HTTP 400)"
+
+The device did not accept the command. Usually the device key is wrong, which happens if the
+device was re-paired in the Tinxy app after being added here. Re-add the device to fetch the
+current key.
+
+### A device stops responding after rapid toggling
+
+This is the firmware lock-up described under [Settings](#settings). Power cycle the device,
+then raise **Command spacing**.
+
+### Entities show as unavailable
+
+The device is not answering within the timeout. Check its Wi-Fi signal using the diagnostic
+sensor. Weak signal (below about -80 dBm) may need a higher **Request timeout**.
+
+### Starting over
+
+Remove the integration from **Settings → Devices & Services**. If something is badly stuck,
+delete `custom_components/tinxylocal/` from your configuration directory and restart.
+
+---
+
+## How it works
+
+**Status** is read by polling `GET /info` on each device, which returns relay states, per relay
+brightness, signal strength and firmware details. Reads are unauthenticated and unrestricted,
+so polling is fast and is **not** affected by the command spacing described below.
+
+**Commands** are sent as `POST /toggle`. The device authenticates each one by decrypting a
+timestamp encrypted with its own copy of your device key, using XXTEA.
+
+That timestamp is in whole seconds and must **exceed every timestamp the device has already
+accepted**. The device stores that high-water mark, which has two consequences: only one
+command per second per device can succeed, and dating a timestamp into the future to get
+around it locks out honestly-dated commands until real time catches up. Commands to a device
+are therefore queued and spaced at least a second apart rather than sent in parallel.
+
+Earlier versions shelled out to a bundled Go program for this, shipping five compiled binaries
+for different CPU architectures. That is now about 70 lines of Python using nothing outside the
+standard library, producing byte-identical output.
+
+---
+
+## Credits
+
+Maintained by [@arevindh](https://github.com/arevindh).
+
+### AI assistance
+
+Parts of this codebase were reviewed and rewritten with [Claude Code](https://claude.ai/code),
+covering the removal of the bundled Go binaries, the pure-Python rewrite of the local
+authentication, mDNS discovery, the diagnostic sensors, and this documentation.
+
+Every change was manually reviewed by the code owner and verified against real Tinxy hardware
+before release. Nothing here was merged unreviewed.
+
+### Upstream work
+
+Parts of this integration come from the [ha-tinxylocal](https://github.com/selvakk2k/ha-tinxylocal)
+fork by [@selvakk2k](https://github.com/selvakk2k), which showed that the local authentication
+token could be produced in pure Python and so made the bundled Go binaries unnecessary. Their work
+is the basis of:
+
+- `crypto.py`, the XXTEA implementation, adapted directly
+- the diagnostic sensor set, reworked here into one description-driven class
+- the optimistic-update approach for instant dashboard feedback
+- the replay-protection guard and `Connection: close` handling
+
+Licensed under the terms in [LICENSE](LICENSE).

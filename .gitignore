@@ -3,3 +3,4 @@ build.md
 .env
 venv
 __pycache__/
+CLAUDE.md

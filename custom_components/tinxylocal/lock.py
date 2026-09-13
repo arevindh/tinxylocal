@@ -1,6 +1,5 @@
 """Lock platform for Tinxy integration."""
 
-import asyncio
 import logging
 from typing import Any, cast
 
@@ -13,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TinxyUpdateCoordinator
+from .entity import TinxyOptimisticMixin
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ async def async_setup_entry(
     async_add_entities(locks)
 
 
-class TinxyLock(CoordinatorEntity, LockEntity):
+class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
     """Representation of a Tinxy lock."""
 
     def __init__(
@@ -78,11 +78,10 @@ class TinxyLock(CoordinatorEntity, LockEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the device status data is available and valid."""
-        if self.coordinator.data is None:
-            _LOGGER.debug(
-                "Coordinator data is not yet available for node %s", self.node_id
-            )
+        """Return True if the last poll succeeded and this node reported data."""
+        # `last_update_success` is what goes false when the device stops answering;
+        # without it the entity would keep serving the last state it ever saw.
+        if not self.coordinator.last_update_success or self.coordinator.data is None:
             return False
 
         node_data = self.coordinator.data.get(self.node_id, {})
@@ -104,6 +103,9 @@ class TinxyLock(CoordinatorEntity, LockEntity):
     @property
     def is_locked(self) -> bool | None:
         """Return True if the lock is locked."""
+        if self._optimistic == "unlocking":
+            return False
+
         # For pulse switches (like door locks), determining lock state is challenging
         # since they don't maintain state like regular switches.
         # We'll use a simple approach: assume the lock is locked by default
@@ -159,6 +161,11 @@ class TinxyLock(CoordinatorEntity, LockEntity):
             return True
 
     @property
+    def is_unlocking(self) -> bool:
+        """Return True while the unlock pulse is in flight."""
+        return self._optimistic == "unlocking"
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return extra state attributes."""
         metadata = self.coordinator.device_metadata.get(self.node_id, {})
@@ -192,17 +199,14 @@ class TinxyLock(CoordinatorEntity, LockEntity):
 
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock the device."""
-        # For pulse switches, we send a pulse (action=1) to unlock
-        # The lock will automatically lock again after its configured timeout
-        try:
-            result = await self.hub.queue_toggle_command(
+        # For pulse switches, we send a pulse (action=1) to unlock.
+        # The lock will automatically lock again after its configured timeout.
+        await self._async_command(
+            "unlocking",
+            self.hub.queue_toggle_command(
                 self.node_id,
                 self.coordinator.nodes[0]["mqtt_password"],
                 self.relay_number,
                 1,
-            )
-            if result:
-                await asyncio.sleep(0.5)
-                await self.coordinator.async_request_refresh()
-        except Exception as e:
-            _LOGGER.error("Failed to unlock device %s: %s", self.node_id, e)
+            ),
+        )

@@ -1,6 +1,5 @@
 """Switch platform for Tinxy integration."""
 
-import asyncio
 import logging
 from typing import Any, cast
 
@@ -15,6 +14,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TinxyUpdateCoordinator
+from .entity import TinxyOptimisticMixin
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
@@ -83,7 +83,7 @@ async def async_setup_entry(
     async_add_entities(switches)
 
 
-class TinxySwitch(CoordinatorEntity, SwitchEntity):
+class TinxySwitch(TinxyOptimisticMixin, CoordinatorEntity, SwitchEntity):
     """Representation of a Tinxy switch."""
 
     def __init__(
@@ -112,12 +112,10 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the device status data is available and valid."""
-        # Return False if coordinator data is None to handle cases where data has not yet loaded
-        if self.coordinator.data is None:
-            _LOGGER.debug(
-                "Coordinator data is not yet available for node %s", self.node_id
-            )
+        """Return True if the last poll succeeded and this node reported data."""
+        # `last_update_success` is what goes false when the device stops answering;
+        # without it the entity would keep serving the last state it ever saw.
+        if not self.coordinator.last_update_success or self.coordinator.data is None:
             return False
 
         node_data = self.coordinator.data.get(self.node_id, {})
@@ -142,6 +140,9 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
     @property
     def is_on(self) -> bool | None:
         """Return the status of the switch."""
+        if self._optimistic is not None:
+            return self._optimistic
+
         # Check if coordinator data is available and fetch data based on node_id
         if self.coordinator.data is None:
             _LOGGER.debug(
@@ -175,30 +176,24 @@ class TinxySwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the switch on."""
-        try:
-            result = await self.hub.queue_toggle_command(
+        await self._async_command(
+            True,
+            self.hub.queue_toggle_command(
                 self.node_id,
                 self.coordinator.nodes[0]["mqtt_password"],
                 self.relay_number,
                 1,
-            )
-            if result:
-                await asyncio.sleep(0.5)
-                await self.coordinator.async_request_refresh()
-        except Exception as e:
-            _LOGGER.error("Failed to turn on switch %s: %s", self.node_id, e)
+            ),
+        )
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the switch off."""
-        try:
-            result = await self.hub.queue_toggle_command(
+        await self._async_command(
+            False,
+            self.hub.queue_toggle_command(
                 self.node_id,
                 self.coordinator.nodes[0]["mqtt_password"],
                 self.relay_number,
                 0,
-            )
-            if result:
-                await asyncio.sleep(0.5)
-                await self.coordinator.async_request_refresh()
-        except Exception as e:
-            _LOGGER.error("Failed to turn off switch %s: %s", self.node_id, e)
+            ),
+        )

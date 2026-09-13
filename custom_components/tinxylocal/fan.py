@@ -1,6 +1,5 @@
 """Fan platform for Tinxy integration."""
 
-import asyncio
 import logging
 from typing import Any, cast
 
@@ -13,6 +12,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import TinxyUpdateCoordinator
+from .entity import TinxyOptimisticMixin
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ async def async_setup_entry(
     async_add_entities(fans)
 
 
-class TinxyFan(CoordinatorEntity, FanEntity):
+class TinxyFan(TinxyOptimisticMixin, CoordinatorEntity, FanEntity):
     """Representation of a Tinxy fan."""
 
     _attr_supported_features = (
@@ -123,11 +123,10 @@ class TinxyFan(CoordinatorEntity, FanEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the device status data is available and valid."""
-        if self.coordinator.data is None:
-            _LOGGER.debug(
-                "Coordinator data is not yet available for node %s", self.node_id
-            )
+        """Return True if the last poll succeeded and this node reported data."""
+        # `last_update_success` is what goes false when the device stops answering;
+        # without it the entity would keep serving the last state it ever saw.
+        if not self.coordinator.last_update_success or self.coordinator.data is None:
             return False
 
         node_data = self.coordinator.data.get(self.node_id, {})
@@ -152,6 +151,9 @@ class TinxyFan(CoordinatorEntity, FanEntity):
     @property
     def is_on(self) -> bool | None:
         """Return True if the fan is on."""
+        if self._optimistic is not None:
+            return self._optimistic > 0
+
         if self.coordinator.data is None:
             _LOGGER.debug(
                 "Coordinator data is not available for node %s", self._attr_unique_id
@@ -178,6 +180,9 @@ class TinxyFan(CoordinatorEntity, FanEntity):
     @property
     def percentage(self) -> int | None:
         """Return the current speed percentage."""
+        if self._optimistic is not None:
+            return self._optimistic
+
         if self.coordinator.data is None:
             return 0
 
@@ -229,18 +234,15 @@ class TinxyFan(CoordinatorEntity, FanEntity):
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the fan off."""
-        try:
-            result = await self.hub.queue_toggle_command(
+        await self._async_command(
+            0,
+            self.hub.queue_toggle_command(
                 self.node_id,
                 self.coordinator.nodes[0]["mqtt_password"],
                 self.relay_number,
                 0,
-            )
-            if result:
-                await asyncio.sleep(0.5)
-                await self.coordinator.async_request_refresh()
-        except Exception as e:
-            _LOGGER.error("Failed to turn off fan %s: %s", self.node_id, e)
+            ),
+        )
 
     async def async_set_percentage(self, percentage: int) -> None:
         """Set the speed percentage of the fan."""
@@ -248,30 +250,17 @@ class TinxyFan(CoordinatorEntity, FanEntity):
             await self.async_turn_off()
             return
 
-        # Map percentage to the nearest discrete speed level
-        if percentage <= 33:
-            brightness = 33
-        elif percentage <= 66:
-            brightness = 66
-        else:
-            brightness = 100
-        
-        # Set the brightness/speed using the CLI (this will also turn on the fan)
-        result = await self._set_brightness(brightness)
-        
-        if result:
-            await asyncio.sleep(0.5)
-            await self.coordinator.async_request_refresh()
+        # The hardware only has these three speeds; snap to the nearest.
+        brightness = next(
+            level for level in SPEED_LEVELS if percentage <= level
+        ) if percentage <= SPEED_LEVELS[-1] else SPEED_LEVELS[-1]
 
-    async def _set_brightness(self, brightness: int) -> bool:
-        """Set the brightness/speed of the fan using CLI."""
-        try:
-            return await self.hub.queue_brightness_command(
+        await self._async_command(
+            brightness,
+            self.hub.queue_brightness_command(
                 self.node_id,
                 self.coordinator.nodes[0]["mqtt_password"],
                 self.relay_number,
                 brightness,
-            )
-        except Exception as e:
-            _LOGGER.error("Failed to set brightness for fan %s: %s", self.node_id, e)
-            return False
+            ),
+        )
