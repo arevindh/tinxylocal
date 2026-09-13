@@ -89,17 +89,16 @@ def _async_repair_doubled_entity_ids(hass: HomeAssistant, entry: ConfigEntry) ->
     """
     registry = er.async_get(hass)
     for item in er.async_entries_for_config_entry(registry, entry.entry_id):
-        device = registry.async_get(item.entity_id)
-        if not device or not item.has_entity_name:
+        if not item.has_entity_name:
             continue
 
         domain, _, object_id = item.entity_id.partition(".")
-        entry_title = slugify(entry.title)
-        doubled = f"{entry_title}_{entry_title}_"
+        prefix = slugify(entry.title)
+        doubled = f"{prefix}_{prefix}_"
         if not object_id.startswith(doubled):
             continue
 
-        fixed = f"{domain}.{object_id.replace(doubled, f'{entry_title}_', 1)}"
+        fixed = f"{domain}.{object_id.replace(doubled, f'{prefix}_', 1)}"
         if registry.async_get(fixed):
             continue
 
