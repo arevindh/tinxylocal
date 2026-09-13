@@ -1,0 +1,3 @@
+# Pins Home Assistant 2026.9.2, which needs Python 3.14.
+# Bump this together with the minimum version in manifest.json.
+pytest-homeassistant-custom-component==0.13.365

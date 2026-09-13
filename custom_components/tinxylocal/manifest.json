@@ -5,19 +5,17 @@
     "@arevindh"
   ],
   "config_flow": true,
-  "description": "Integration for Tinxy Local devices.",
   "dependencies": [],
   "documentation": "https://github.com/arevindh/tinxylocal/blob/main/README.md",
-  "issue_tracker": "https://github.com/arevindh/tinxylocal/issues",
-  "homekit": {},
+  "integration_type": "device",
   "iot_class": "local_polling",
-  "ssdp": [],
+  "issue_tracker": "https://github.com/arevindh/tinxylocal/issues",
+  "requirements": [],
+  "version": "3.0.0b1",
   "zeroconf": [
     {
       "name": "tinxy*",
       "type": "_http._tcp.local."
     }
-  ],
-  "version": "2.6.0",
-  "homeassistant": ">=2025.4.0"
+  ]
 }

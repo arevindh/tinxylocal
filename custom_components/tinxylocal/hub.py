@@ -8,14 +8,15 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 import aiohttp
-import platform
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import TINXY_BACKEND
+from .const import DEFAULT_RATE_LIMIT_DELAY, DEFAULT_REQUEST_TIMEOUT, TINXY_BACKEND
+from .crypto import encrypt_tinxy_payload
 from .tinxycloud import TinxyCloud, TinxyHostConfiguration
 
 _LOGGER = logging.getLogger(__name__)
 
-HEADERS = {"Content-Type": "application/json"}
+HEADERS = {"Content-Type": "application/json", "Connection": "close"}
 
 
 @dataclass
@@ -41,9 +42,24 @@ class TinxyLocalException(Exception):
     """General exception for Tinxy local device errors."""
 
 
+class TinxyCommandSuperseded(TinxyLocalException):
+    """A newer command for the same relay replaced this one before it ran.
+
+    Expected whenever a switch is operated twice in quick succession. The newer
+    command carries the state the user asked for, so this must not surface as an
+    error.
+    """
+
+
 class TinxyLocalHub:
     """TinxyLocalHub class for interacting with Tinxy devices locally."""
-    def __init__(self, hass, host: str, request_timeout: int = 5) -> None:
+    def __init__(
+        self,
+        hass,
+        host: str,
+        request_timeout: int = DEFAULT_REQUEST_TIMEOUT,
+        rate_limit_delay: float = DEFAULT_RATE_LIMIT_DELAY,
+    ) -> None:
         """Initialize with Home Assistant instance and the device host."""
         self.hass = hass
         self.host = f"http://{host}"
@@ -53,12 +69,13 @@ class TinxyLocalHub:
         # Rate limiting configuration
         self.command_timeout = 30.0  # seconds
         self.queue_limit = 50  # max commands per device
-        self.rate_limit_delay = 1.0  # seconds between commands
+        self.rate_limit_delay = rate_limit_delay  # seconds between commands
         
         # Per-device command queues and workers
         self.device_queues: Dict[str, deque] = {}
         self.device_workers: Dict[str, asyncio.Task] = {}
         self.device_last_command: Dict[str, float] = {}
+        self.last_command_timestamp = 0
         self._shutdown = False
 
     async def authenticate(self, api_key: str, web_session) -> bool:
@@ -72,6 +89,11 @@ class TinxyLocalHub:
         await api.sync_devices()
         return True
 
+    async def get_info(self, web_session) -> dict | None:
+        """Return the raw /info payload, or None if the device did not answer with one."""
+        response = await self._send_request("GET", "/info", web_session=web_session)
+        return response if isinstance(response, dict) else None
+
     async def validate_ip(self, web_session, chip_id=None) -> str:
         """Validate the device's local API by checking the /info endpoint.
 
@@ -83,7 +105,7 @@ class TinxyLocalHub:
 
         """
         try:
-            response = await self._send_request("GET", "/info", web_session=web_session)
+            response = await self.get_info(web_session)
             if response is not None:
                 if chip_id:
                     if response["chip_id"] == chip_id:
@@ -121,12 +143,16 @@ class TinxyLocalHub:
                 url=url,
                 json=payload if method == "POST" else None,
                 headers=HEADERS,
-                timeout=self.request_timeout,
+                timeout=aiohttp.ClientTimeout(total=self.request_timeout),
             ) as response:
                 if response.status == 200:
                     return await response.json(content_type=None)
                 if response.status == 400:
-                    handle_exception(f"Request error: status {response.status}", None)
+                    handle_exception(
+                        f"Device at {url} rejected the request (HTTP 400). Check that "
+                        "the device key is correct in the integration options.",
+                        None,
+                    )
                 else:
                     handle_exception(
                         f"Unexpected error: status {response.status}", None
@@ -139,142 +165,53 @@ class TinxyLocalHub:
             handle_exception(f"Error for request to {url}: {e}", e)
 
     async def tinxy_toggle(
-        self, mqttpass: str, relay_number: int, action: int) -> bool:
-        """Toggle Tinxy device state using the CLI executable."""
-        if action not in [0, 1]:
+        self, mqttpass: str, relay_number: int, action: int
+    ) -> bool:
+        """Toggle a relay via the device's local HTTP API."""
+        if action not in (0, 1):
             _LOGGER.error("Action must be 0 (off) or 1 (on): %s", action)
             return False
-
-        action_str = "on" if action == 1 else "off"
-
-        INTEGRATION_PATH = self.hass.config.path(f"custom_components/tinxylocal/build")
-        # Determine the correct executable based on the system architecture
-        system_arch = platform.machine()
-        arch_table = {
-            "x86_64": ["x64", "x86_64", "amd64", "intel"],
-            "armv7l": ["armv7l"],
-            "armv6l": ["armv6l"],
-            "aarch64": ["aarch64", "arm64"],
-            "win": ["win"],
-        }
-
-        executable_path = None
-        for arch, aliases in arch_table.items():
-            if system_arch in aliases or system_arch.startswith(arch):
-                if arch == "x86_64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_amd64"
-                elif arch == "armv7l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv7"
-                elif arch == "armv6l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv6"
-                elif arch == "aarch64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_arm64"
-                elif arch == "win":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_windows_amd64.exe"
-                break
-
-        if not executable_path:
-            _LOGGER.error("Unsupported system architecture: %s", system_arch)
-            return False
-
-        command = [
-            executable_path,
-            "-action", str(action),
-            "-ip", self.ip_address,
-            "-password", mqttpass,
-            "-relay", str(relay_number),
-        ]
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
-
-            if process.returncode == 0:
-                _LOGGER.info("Successfully toggled relay %s to %s", relay_number, action_str)
-                return True
-            else:
-                _LOGGER.error(
-                    "Error toggling relay %s to %s. Stderr: %s",
-                    relay_number,
-                    action_str,
-                    stderr.decode().strip(),
-                )
-                return False
-        except Exception as e:
-            _LOGGER.error("Failed to execute toggle command: %s", e)
-            return False
+        return await self._send_command(mqttpass, relay_number, action)
 
     async def tinxy_set_brightness(
-        self, mqttpass: str, relay_number: int, brightness: int) -> bool:
-        """Set Tinxy device brightness using the CLI executable."""
-
-        INTEGRATION_PATH = self.hass.config.path(f"custom_components/tinxylocal/build")
-        # Determine the correct executable based on the system architecture
-        system_arch = platform.machine()
-        arch_table = {
-            "x86_64": ["x64", "x86_64", "amd64", "intel"],
-            "armv7l": ["armv7l"],
-            "armv6l": ["armv6l"],
-            "aarch64": ["aarch64", "arm64"],
-            "win": ["win"],
-        }
-
-        executable_path = None
-        for arch, aliases in arch_table.items():
-            if system_arch in aliases or system_arch.startswith(arch):
-                if arch == "x86_64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_amd64"
-                elif arch == "armv7l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv7"
-                elif arch == "armv6l":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_armv6"
-                elif arch == "aarch64":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_linux_arm64"
-                elif arch == "win":
-                    executable_path = f"{INTEGRATION_PATH}/tinxy-cli_windows_amd64.exe"
-                break
-
-        if not executable_path:
-            _LOGGER.error("Unsupported system architecture: %s", system_arch)
+        self, mqttpass: str, relay_number: int, brightness: int
+    ) -> bool:
+        """Set relay brightness/fan speed via the device's local HTTP API."""
+        if not 0 <= brightness <= 100:
+            _LOGGER.error("Brightness must be between 0 and 100: %s", brightness)
             return False
+        # Setting a brightness always implies turning the relay on.
+        return await self._send_command(mqttpass, relay_number, 1, brightness)
 
-        command = [
-            executable_path,
-            "-action", "1",  # Always turn on when setting brightness
-            "-ip", self.ip_address,
-            "-password", mqttpass,
-            "-relay", str(relay_number),
-            "-brightness", str(brightness),
-        ]
+    async def _send_command(
+        self,
+        mqttpass: str,
+        relay_number: int,
+        action: int,
+        brightness: int | None = None,
+    ) -> bool:
+        """POST an XXTEA-authenticated command to the device.
 
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await process.communicate()
+        The device authenticates a command by decrypting the unix timestamp with
+        its own copy of the mqtt password, so the timestamp must be strictly
+        increasing or the firmware rejects the request as a replay (HTTP 400).
+        """
+        now_ts = max(int(time.time()), self.last_command_timestamp + 1)
+        self.last_command_timestamp = now_ts
 
-            if process.returncode == 0:
-                _LOGGER.info("Successfully set brightness %s for relay %s", brightness, relay_number)
-                return True
-            else:
-                _LOGGER.warning(
-                    "Brightness control failed for relay %s (brightness: %s). Stderr: %s. Falling back to toggle.",
-                    relay_number,
-                    brightness,
-                    stderr.decode().strip(),
-                )
-                # Fallback to simple toggle if brightness control is not supported
-                return await self.tinxy_toggle(mqttpass, relay_number, 1)
-        except Exception as e:
-            _LOGGER.error("Failed to execute brightness command: %s. Falling back to toggle.", e)
-            # Fallback to simple toggle if brightness control fails
-            return await self.tinxy_toggle(mqttpass, relay_number, 1)
+        payload = {
+            "password": encrypt_tinxy_payload(mqttpass, timestamp=now_ts),
+            "action": str(action),
+            "relayNumber": relay_number,
+        }
+        if brightness is not None:
+            payload["brightness"] = brightness
+
+        web_session = async_get_clientsession(self.hass)
+        response = await self._send_request(
+            "POST", "/toggle", payload=payload, web_session=web_session
+        )
+        return response is not None
 
     async def fetch_device_data(self, node, web_session):
         """Fetch and decode device data."""
@@ -410,31 +347,29 @@ class TinxyLocalHub:
             )
             raise TinxyLocalException("Command queue full")
 
-        # Deduplication: remove pending commands for the same relay
+        # Deduplication: drop pending commands for the same relay.
+        #
+        # This MUST mutate the existing deque rather than build a replacement.
+        # The worker holds its own reference to this object across the rate-limit
+        # sleep below, so swapping `device_queues[device_id]` for a new deque
+        # leaves the worker popping from an orphaned, now-empty one:
+        # "pop from an empty deque", a lost second of latency, and an error in
+        # the log every time a second switch on the same device is operated
+        # mid-sleep.
         if deduplicate:
-            new_queue = deque()
-            removed_count = 0
-            
-            while queue:
-                cmd = queue.popleft()
-                if cmd.relay_number == relay_number:
-                    # Cancel the old command
+            superseded = [cmd for cmd in queue if cmd.relay_number == relay_number]
+            if superseded:
+                kept = [cmd for cmd in queue if cmd.relay_number != relay_number]
+                queue.clear()
+                queue.extend(kept)
+                for cmd in superseded:
                     if cmd.future and not cmd.future.done():
                         cmd.future.set_exception(
-                            TinxyLocalException("Superseded by newer command")
+                            TinxyCommandSuperseded("Superseded by newer command")
                         )
-                    removed_count += 1
-                else:
-                    new_queue.append(cmd)
-            
-            # Replace the queue
-            self.device_queues[device_id] = new_queue
-            queue = new_queue
-            
-            if removed_count > 0:
                 _LOGGER.debug(
-                    "Removed %d pending commands for device %s relay %d", 
-                    removed_count, device_id, relay_number
+                    "Dropped %d pending command(s) for device %s relay %d",
+                    len(superseded), device_id, relay_number,
                 )
 
         # Create and queue the new command
@@ -478,6 +413,10 @@ class TinxyLocalHub:
                 if time_since_last < self.rate_limit_delay:
                     sleep_time = self.rate_limit_delay - time_since_last
                     await asyncio.sleep(sleep_time)
+
+                # A supersede during that sleep can empty the queue.
+                if not queue:
+                    continue
 
                 # Get the next command
                 command = queue.popleft()

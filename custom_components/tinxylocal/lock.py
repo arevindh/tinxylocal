@@ -1,31 +1,30 @@
 """Lock platform for Tinxy integration."""
 
-import asyncio
 import logging
-from typing import Any, cast
+from typing import Any
 
 from homeassistant.components.lock import LockEntity
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
-from .coordinator import TinxyUpdateCoordinator
+from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
+from .entity import TinxyOptimisticMixin
 from .hub import TinxyLocalHub
 
 _LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(
-    hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
+    hass: HomeAssistant,
+    entry: TinxyConfigEntry,
+    async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Tinxy locks based on a config entry."""
-    coordinator = cast(
-        TinxyUpdateCoordinator, hass.data[DOMAIN][entry.entry_id]["coordinator"]
-    )
-    hubs = hass.data[DOMAIN][entry.entry_id]["hubs"]
+    coordinator = entry.runtime_data
+    hubs = coordinator.hubs
 
     locks = []
     device_data = entry.data["device"]
@@ -33,14 +32,13 @@ async def async_setup_entry(
     # Check if this is a lock device based on the typeId
     if device_data.get("typeId", {}).get("gtype") == "action.devices.types.LOCK":
         for node in coordinator.nodes:
-            device_name = node["name"]
             # For lock devices, create a single lock entity
             lock = TinxyLock(
                 coordinator=coordinator,
                 hub=hubs[0],
                 node_id=node["device_id"],
                 relay_number=1,  # Locks typically use relay 1
-                name=device_name,
+                device_name=node["name"],
                 device_data=device_data,
             )
             locks.append(lock)
@@ -48,8 +46,13 @@ async def async_setup_entry(
     async_add_entities(locks)
 
 
-class TinxyLock(CoordinatorEntity, LockEntity):
+class TinxyLock(TinxyOptimisticMixin, CoordinatorEntity, LockEntity):
     """Representation of a Tinxy lock."""
+
+    # Bronze `has-entity-name`. The lock is the device's only entity, so it takes
+    # the device's own name: `_attr_name = None` is how HA expresses that.
+    _attr_has_entity_name = True
+    _attr_name = None
 
     def __init__(
         self,
@@ -57,7 +60,7 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         hub: TinxyLocalHub,
         node_id: str,
         relay_number: int,
-        name: str,
+        device_name: str,
         device_data: dict,
     ) -> None:
         """Initialize the Tinxy lock."""
@@ -66,7 +69,7 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         self.hub = hub
         self.node_id = node_id
         self.relay_number = relay_number
-        self._attr_name = name
+        self._device_name = device_name
         self._attr_unique_id = f"{node_id}_lock"
         self._device_data = device_data
         self._attr_supported_features = 0  # Basic lock/unlock only
@@ -78,11 +81,10 @@ class TinxyLock(CoordinatorEntity, LockEntity):
 
     @property
     def available(self) -> bool:
-        """Return True if the device status data is available and valid."""
-        if self.coordinator.data is None:
-            _LOGGER.debug(
-                "Coordinator data is not yet available for node %s", self.node_id
-            )
+        """Return True if the last poll succeeded and this node reported data."""
+        # `last_update_success` is what goes false when the device stops answering;
+        # without it the entity would keep serving the last state it ever saw.
+        if not self.coordinator.last_update_success or self.coordinator.data is None:
             return False
 
         node_data = self.coordinator.data.get(self.node_id, {})
@@ -95,7 +97,7 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         
         return {
             "identifiers": {(DOMAIN, self.node_id)},
-            "name": self._attr_name,
+            "name": self._device_name,
             "manufacturer": "Tinxy",
             "model": self._device_data.get("typeId", {}).get("long_name", "Smart Lock"),
             "sw_version": metadata.get("firmware", str(self._device_data.get("firmwareVersion", "Unknown"))),
@@ -104,6 +106,9 @@ class TinxyLock(CoordinatorEntity, LockEntity):
     @property
     def is_locked(self) -> bool | None:
         """Return True if the lock is locked."""
+        if self._optimistic == "unlocking":
+            return False
+
         # For pulse switches (like door locks), determining lock state is challenging
         # since they don't maintain state like regular switches.
         # We'll use a simple approach: assume the lock is locked by default
@@ -159,6 +164,11 @@ class TinxyLock(CoordinatorEntity, LockEntity):
             return True
 
     @property
+    def is_unlocking(self) -> bool:
+        """Return True while the unlock pulse is in flight."""
+        return self._optimistic == "unlocking"
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return extra state attributes."""
         metadata = self.coordinator.device_metadata.get(self.node_id, {})
@@ -188,21 +198,20 @@ class TinxyLock(CoordinatorEntity, LockEntity):
         # For most door locks, there's no explicit "lock" command
         # The lock automatically locks after a timeout
         # This method exists for Home Assistant compatibility but may not do anything
-        _LOGGER.info("Lock command sent to %s (may not be supported by device)", self._attr_name)
+        _LOGGER.info(
+            "Lock command sent to %s (may not be supported by device)", self._device_name
+        )
 
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock the device."""
-        # For pulse switches, we send a pulse (action=1) to unlock
-        # The lock will automatically lock again after its configured timeout
-        try:
-            result = await self.hub.queue_toggle_command(
+        # For pulse switches, we send a pulse (action=1) to unlock.
+        # The lock will automatically lock again after its configured timeout.
+        await self._async_command(
+            "unlocking",
+            self.hub.queue_toggle_command(
                 self.node_id,
                 self.coordinator.nodes[0]["mqtt_password"],
                 self.relay_number,
                 1,
-            )
-            if result:
-                await asyncio.sleep(0.5)
-                await self.coordinator.async_request_refresh()
-        except Exception as e:
-            _LOGGER.error("Failed to unlock device %s: %s", self.node_id, e)
+            ),
+        )

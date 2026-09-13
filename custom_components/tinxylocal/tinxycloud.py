@@ -1,5 +1,7 @@
+import logging
 from dataclasses import dataclass
-from pprint import pprint
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class TinxyException(Exception):
@@ -76,8 +78,7 @@ class TinxyCloud:
 
     async def tinxy_request(self, path, payload=None, method="GET"):
         """Tinxy API request."""
-
-        pprint("new request to " + path)
+        _LOGGER.debug("Tinxy cloud request: %s", path)
 
         headers = {
             "Content-Type": "application/json",
@@ -302,8 +303,7 @@ class TinxyCloud:
                     }
                 )
         else:
-            print("unknown  =" + data["typeId"]["name"])
-            # print(self.enabled_list)
+            _LOGGER.debug("Skipping unsupported device type: %s", data["typeId"]["name"])
         return devices
 
     def get_device_type(self, tinxy_type, itemid):
