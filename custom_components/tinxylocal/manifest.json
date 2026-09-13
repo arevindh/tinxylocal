@@ -5,7 +5,6 @@
     "@arevindh"
   ],
   "config_flow": true,
-  "description": "Integration for Tinxy Local devices.",
   "dependencies": [],
   "documentation": "https://github.com/arevindh/tinxylocal/blob/main/README.md",
   "integration_type": "device",

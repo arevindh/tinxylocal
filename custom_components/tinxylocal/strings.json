@@ -35,10 +35,6 @@
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
       "api_not_available": "The device answered but its local API is not enabled.",
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
-    },
-    "options": {
-      "token_choice_existing": "Use existing API token",
-      "token_choice_new": "Enter a new API token"
     }
   },
   "options": {
