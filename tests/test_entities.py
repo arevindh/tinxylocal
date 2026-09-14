@@ -139,3 +139,49 @@ async def test_failed_command_surfaces_to_the_user(
         )
 
     assert hass.states.get("switch.hall_led").state == STATE_OFF
+
+
+async def test_a_second_switch_keeps_its_state_while_queued(
+    hass: HomeAssistant, loaded_entry: MockConfigEntry
+) -> None:
+    """Operating one switch must not snap a second one back.
+
+    Commands to one device are queued and spaced, so the second switch waits
+    behind the first. The first one's refresh used to clear the second's
+    optimistic value before its command had even been sent, so it flicked back
+    to its old state and only corrected a second later when its own command
+    landed.
+    """
+    import asyncio
+
+    client = loaded_entry.runtime_data.clients[0]
+    release = asyncio.Event()
+
+    async def _slow_command(*args, **kwargs):
+        await release.wait()
+        return True
+
+    assert hass.states.get("switch.hall_fan").state == STATE_OFF
+
+    with patch.object(client, "toggle", _slow_command):
+        task = hass.async_create_task(
+            hass.services.async_call(
+                "switch", "turn_on", {ATTR_ENTITY_ID: "switch.hall_fan"}, blocking=True
+            )
+        )
+        await asyncio.sleep(0)
+        assert hass.states.get("switch.hall_fan").state == STATE_ON
+
+        # The first switch's command finishes and the coordinator notifies every
+        # entity. That notification is what used to clear this entity's guess.
+        # No async_block_till_done here: the command above is deliberately held
+        # open, and waiting for every task would wait for it too.
+        loaded_entry.runtime_data.async_update_listeners()
+        await asyncio.sleep(0)
+
+        # the queued switch must still show what the user asked for
+        assert hass.states.get("switch.hall_fan").state == STATE_ON
+
+        release.set()
+        await task
+        await hass.async_block_till_done()
