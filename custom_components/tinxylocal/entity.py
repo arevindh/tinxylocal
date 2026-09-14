@@ -38,11 +38,20 @@ class TinxyOptimisticMixin:
     """
 
     _optimistic: Any = None
+    _commands_in_flight: int = 0
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Fresh data from the device always wins over what we guessed."""
-        self._optimistic = None
+        """Fresh data wins, unless this entity's own command is still pending.
+
+        Commands to one device are queued and spaced, so operating a second
+        switch puts it behind the first. The first one's refresh would
+        otherwise clear the second's guess before its command had even been
+        sent, snapping it back to the old state until its own command landed
+        a second later.
+        """
+        if not self._commands_in_flight:
+            self._optimistic = None
         super()._handle_coordinator_update()
 
     async def _async_command(
@@ -54,6 +63,7 @@ class TinxyOptimisticMixin:
         instead of leaving the entity silently snapped back to its old state.
         """
         self._optimistic = optimistic
+        self._commands_in_flight += 1
         self.async_write_ha_state()
 
         try:
@@ -67,6 +77,9 @@ class TinxyOptimisticMixin:
             self._optimistic = None
             self.async_write_ha_state()
             raise HomeAssistantError(f"{self.name}: {err}") from err
+        finally:
+            self._commands_in_flight -= 1
 
+        # Give the relay a moment to settle before believing the device again.
         await asyncio.sleep(SETTLE_DELAY)
         await self.coordinator.async_request_refresh()
