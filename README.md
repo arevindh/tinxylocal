@@ -289,5 +289,7 @@ basis of:
 - the diagnostic sensor set, reworked here into one description-driven class
 - the optimistic-update approach for instant dashboard feedback
 - the command-spacing guard and `Connection: close` handling
+- the credential guidance above, and the note that EVA bulbs cannot be reached
+  locally: both were first documented in their README
 
 Licensed under the terms in [LICENSE](LICENSE).
