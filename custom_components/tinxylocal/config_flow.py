@@ -244,6 +244,68 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
         )
 
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> config_entries.ConfigFlowResult:
+        """Re-point an entry at a new address, or replace its API token.
+
+        The chip id is checked exactly as initial setup checks it, so a typo
+        cannot silently attach an entry to a different physical device. This is
+        where host and token are edited; options carries only the timings.
+        """
+        entry = self._get_reconfigure_entry()
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                if user_input[CONF_API_KEY] != entry.data.get(CONF_API_KEY):
+                    await validate_input(self.hass, user_input)
+
+                hub = TinxyLocalHub(self.hass, user_input[CONF_HOST])
+                status = await hub.validate_ip(
+                    async_get_clientsession(self.hass),
+                    entry.data[CONF_DEVICE]["uuidRef"]["uuid"],
+                )
+                if status != "ok":
+                    errors["base"] = {
+                        "wrong_chip_id": "wrong_chip_id",
+                        "api_not_available": "api_not_available",
+                    }.get(status, "cannot_connect")
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Unexpected error while reconfiguring")
+                errors["base"] = "unknown"
+
+            if not errors:
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates={
+                        CONF_HOST: user_input[CONF_HOST],
+                        CONF_API_KEY: user_input[CONF_API_KEY],
+                    },
+                )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_HOST, default=entry.data[CONF_HOST]): str,
+                    vol.Required(
+                        CONF_API_KEY, default=entry.data.get(CONF_API_KEY, "")
+                    ): selector.TextSelector(
+                        selector.TextSelectorConfig(
+                            type=selector.TextSelectorType.PASSWORD,
+                            autocomplete="off",
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
+        )
+
     async def async_step_choose_token(
         self, user_input: dict[str, Any]
     ) -> config_entries.ConfigFlowResult:
@@ -344,7 +406,7 @@ class InvalidAuth(HomeAssistantError):
 
 
 class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle Tinxy Local options to change API token."""
+    """Handle Tinxy Local timing options."""
 
     def __init__(self) -> None:
         """Initialize options flow."""
@@ -353,7 +415,7 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
-        """Manage the options to update API token and request timeout."""
+        """Manage the timing options. Host and token live in the reconfigure flow."""
         errors: dict[str, str] = {}
         
         if user_input is not None:
@@ -369,39 +431,8 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
                     errors=errors,
                 )
             
-            # Update entry with the new settings
-            updated_data = {**self.config_entry.data}
             updated_options = {**self.config_entry.options}  # Preserve existing options
-            
-            # Update host IP if changed
-            if CONF_HOST in user_input and user_input[CONF_HOST] != self.config_entry.data.get(CONF_HOST):
-                updated_data[CONF_HOST] = user_input[CONF_HOST]
-            
-            # Update API key if changed
-            if CONF_API_KEY in user_input and user_input[CONF_API_KEY] != self.config_entry.data.get(CONF_API_KEY):
-                try:
-                    await validate_input(self.hass, user_input)
-                    updated_data[CONF_API_KEY] = user_input[CONF_API_KEY]
-                except InvalidAuth:
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=self._get_options_schema(),
-                        errors={"base": "invalid_auth"},
-                    )
-                except CannotConnect:
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=self._get_options_schema(),
-                        errors={"base": "cannot_connect"},
-                    )
-                except Exception:
-                    _LOGGER.exception("Unexpected exception during token update")
-                    return self.async_show_form(
-                        step_id="init",
-                        data_schema=self._get_options_schema(),
-                        errors={"base": "unknown"},
-                    )
-            
+
             # Update request timeout
             updated_options[CONF_REQUEST_TIMEOUT] = timeout
             
@@ -419,7 +450,6 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
             # Update the config entry
             self.hass.config_entries.async_update_entry(
                 self.config_entry,
-                data=updated_data,
                 options=updated_options,
             )
             
@@ -454,18 +484,8 @@ class TinxyLocalOptionsFlowHandler(config_entries.OptionsFlow):
             CONF_RATE_LIMIT_DELAY,
             DEFAULT_RATE_LIMIT_DELAY
         )
-        current_api_key = self.config_entry.data.get(CONF_API_KEY, "")
-        current_host = self.config_entry.data.get(CONF_HOST, "")
-        
         return vol.Schema(
             {
-                vol.Optional(CONF_HOST, default=current_host): str,
-                vol.Optional(CONF_API_KEY, default=current_api_key): selector.TextSelector(
-                    selector.TextSelectorConfig(
-                        type=selector.TextSelectorType.PASSWORD,
-                        autocomplete="off",
-                    )
-                ),
                 vol.Optional(
                     CONF_REQUEST_TIMEOUT, 
                     default=current_timeout

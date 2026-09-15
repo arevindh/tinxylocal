@@ -23,35 +23,46 @@
         "data": {
           "api_key": "API Key"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Tinxy device",
+        "description": "Update the address this device is reached at, or replace the API key. The IP is checked against the device's chip id before it is saved.",
+        "data": {
+          "host": "Device IP Address",
+          "api_key": "API Key"
+        },
+        "data_description": {
+          "host": "Local IP address of the Tinxy device",
+          "api_key": "Leave unchanged if not updating"
+        }
       }
     },
     "error": {
       "cannot_connect": "Failed to connect",
       "invalid_auth": "Invalid authentication",
       "unknown": "Unexpected error",
-      "device_not_in_account": "That device is not in the Tinxy account this API key belongs to."
+      "device_not_in_account": "That device is not in the Tinxy account this API key belongs to.",
+      "wrong_chip_id": "Another Tinxy device answered at that address. Check the IP.",
+      "api_not_available": "The device answered but its local API is not enabled."
     },
     "abort": {
       "already_configured": "Device is already configured",
       "api_not_available": "The device answered but its local API is not enabled.",
-      "cannot_connect": "Failed to connect"
+      "cannot_connect": "Failed to connect",
+      "reconfigure_successful": "Re-configuration was successful"
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Tinxy Local Options",
-        "description": "Configure advanced settings for Tinxy Local integration.",
+        "description": "Configure advanced settings for Tinxy Local integration. The device address and API key are changed under Reconfigure.",
         "data": {
-          "host": "Device IP Address",
-          "api_key": "API Key",
           "request_timeout": "Request Timeout",
           "polling_interval": "Polling Interval",
           "rate_limit_delay": "Command spacing"
         },
         "data_description": {
-          "host": "Local IP address of the Tinxy device",
-          "api_key": "Leave unchanged if not updating",
           "request_timeout": "Timeout in seconds for HTTP requests to Tinxy devices. Default is 3 seconds.",
           "polling_interval": "How often to poll devices for status updates in seconds. Default is 6 seconds. Must be ≥ request timeout.",
           "rate_limit_delay": "Minimum gap between commands to one device. Default is 1 second, which is the fastest the device's authentication allows: its token encrypts a whole-second timestamp, so two commands in the same second cannot both be accepted. This applies per device, not per switch. Raise it if a device stops responding."
@@ -59,9 +70,6 @@
       }
     },
     "error": {
-      "invalid_auth": "Invalid authentication",
-      "cannot_connect": "Failed to connect",
-      "unknown": "Unexpected error",
       "polling_less_than_timeout": "Polling interval must be greater than or equal to request timeout"
     }
   }

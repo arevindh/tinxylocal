@@ -7,7 +7,7 @@ import logging
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import slugify
 
@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_POLLING_INTERVAL,
     DEFAULT_RATE_LIMIT_DELAY,
     DEFAULT_REQUEST_TIMEOUT,
+    DOMAIN,
 )
 from .coordinator import TinxyConfigEntry, TinxyUpdateCoordinator
 from .hub import TinxyLocalHub
@@ -154,6 +155,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> boo
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, entry: ConfigEntry, device_entry: dr.DeviceEntry
+) -> bool:
+    """Let the user delete a stale device from the UI, but not the live one.
+
+    Re-pointing an entry at different hardware leaves the old registry row
+    behind with no entities under it. Defining this hook is what puts a delete
+    button on that row. The device the entry is actually polling would just be
+    recreated on the next refresh, so refuse that one.
+    """
+    return (DOMAIN, entry.data[CONF_DEVICE]["_id"]) not in device_entry.identifiers
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TinxyConfigEntry) -> bool:

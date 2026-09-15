@@ -323,8 +323,6 @@ async def test_options_flow_saves_settings(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_HOST: HOST,
-            CONF_API_KEY: API_KEY,
             CONF_REQUEST_TIMEOUT: 8,
             CONF_POLLING_INTERVAL: 15,
             CONF_RATE_LIMIT_DELAY: 2,
@@ -345,8 +343,6 @@ async def test_options_flow_rejects_polling_below_timeout(
     result = await hass.config_entries.options.async_configure(
         result["flow_id"],
         {
-            CONF_HOST: HOST,
-            CONF_API_KEY: API_KEY,
             CONF_REQUEST_TIMEOUT: 10,
             CONF_POLLING_INTERVAL: 5,
         },
@@ -355,29 +351,57 @@ async def test_options_flow_rejects_polling_below_timeout(
     assert result["errors"] == {"polling_interval": "polling_less_than_timeout"}
 
 
-async def test_options_flow_rejects_bad_new_token(
+# ------------------------------------------------------------ reconfigure
+
+
+async def _start_reconfigure(hass: HomeAssistant, entry: MockConfigEntry):
+    """Open the reconfigure flow for an entry."""
+    return await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": config_entries.SOURCE_RECONFIGURE,
+            "entry_id": entry.entry_id,
+        },
+    )
+
+
+async def test_reconfigure_rejects_bad_new_token(
     hass: HomeAssistant, loaded_entry: MockConfigEntry
 ) -> None:
     """A replacement token is validated before it is stored."""
     from custom_components.tinxylocal.config_flow import InvalidAuth
 
-    result = await hass.config_entries.options.async_init(loaded_entry.entry_id)
+    result = await _start_reconfigure(hass, loaded_entry)
+    assert result["step_id"] == "reconfigure"
     with patch(
         "custom_components.tinxylocal.config_flow.validate_input",
         side_effect=InvalidAuth,
     ):
-        result = await hass.config_entries.options.async_configure(
+        result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {
-                CONF_HOST: HOST,
-                CONF_API_KEY: "a-different-token",
-                CONF_REQUEST_TIMEOUT: 5,
-                CONF_POLLING_INTERVAL: 6,
-            },
+            {CONF_HOST: HOST, CONF_API_KEY: "a-different-token"},
         )
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": "invalid_auth"}
     assert loaded_entry.data[CONF_API_KEY] == API_KEY
+
+
+async def test_reconfigure_rejects_another_device(
+    hass: HomeAssistant, loaded_entry: MockConfigEntry
+) -> None:
+    """An address holding different hardware must not be adopted silently."""
+    result = await _start_reconfigure(hass, loaded_entry)
+    with patch(
+        "custom_components.tinxylocal.hub.TinxyLocalHub.validate_ip",
+        return_value="wrong_chip_id",
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_HOST: "10.0.28.55", CONF_API_KEY: API_KEY},
+        )
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"] == {"base": "wrong_chip_id"}
+    assert loaded_entry.data[CONF_HOST] == HOST
 
 
 async def test_lock_gets_a_relay_name_backfilled(
@@ -439,21 +463,21 @@ async def test_zeroconf_reuses_a_saved_token(
     assert result["title"] == "Front Door"
 
 
-async def test_options_flow_updates_host(
+async def test_reconfigure_updates_host(
     hass: HomeAssistant, loaded_entry: MockConfigEntry
 ) -> None:
     """A device moved by hand can be re-pointed without re-adding it."""
-    result = await hass.config_entries.options.async_init(loaded_entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"],
-        {
-            CONF_HOST: "10.0.28.55",
-            CONF_API_KEY: API_KEY,
-            CONF_REQUEST_TIMEOUT: 5,
-            CONF_POLLING_INTERVAL: 6,
-        },
-    )
+    result = await _start_reconfigure(hass, loaded_entry)
+    with patch(
+        "custom_components.tinxylocal.hub.TinxyLocalHub.validate_ip", return_value="ok"
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {CONF_HOST: "10.0.28.55", CONF_API_KEY: API_KEY},
+        )
     await hass.async_block_till_done()
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
     assert loaded_entry.data[CONF_HOST] == "10.0.28.55"
 
 
@@ -461,43 +485,34 @@ async def test_options_flow_updates_host(
     ("error", "expected"),
     [("CannotConnect", "cannot_connect"), ("RuntimeError", "unknown")],
 )
-async def test_options_flow_token_update_failures(
+async def test_reconfigure_token_update_failures(
     hass: HomeAssistant, loaded_entry: MockConfigEntry, error: str, expected: str
 ) -> None:
     """A new token that cannot be checked leaves the stored one alone."""
     import custom_components.tinxylocal.config_flow as cf
 
     exc = getattr(cf, error, None) or RuntimeError
-    result = await hass.config_entries.options.async_init(loaded_entry.entry_id)
+    result = await _start_reconfigure(hass, loaded_entry)
     with patch.object(cf, "validate_input", side_effect=exc):
-        result = await hass.config_entries.options.async_configure(
+        result = await hass.config_entries.flow.async_configure(
             result["flow_id"],
-            {
-                CONF_HOST: HOST,
-                CONF_API_KEY: "replacement-token",
-                CONF_REQUEST_TIMEOUT: 5,
-                CONF_POLLING_INTERVAL: 6,
-            },
+            {CONF_HOST: HOST, CONF_API_KEY: "replacement-token"},
         )
     assert result["type"] is FlowResultType.FORM
     assert result["errors"] == {"base": expected}
     assert loaded_entry.data[CONF_API_KEY] == API_KEY
 
 
-async def test_options_flow_accepts_a_new_token(
+async def test_reconfigure_accepts_a_new_token(
     hass: HomeAssistant, loaded_entry: MockConfigEntry, device_online: AiohttpClientMocker
 ) -> None:
     """A replacement token that validates is stored."""
-    result = await hass.config_entries.options.async_init(loaded_entry.entry_id)
-    result = await hass.config_entries.options.async_configure(
+    result = await _start_reconfigure(hass, loaded_entry)
+    result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {
-            CONF_HOST: HOST,
-            CONF_API_KEY: "a-fresh-token",
-            CONF_REQUEST_TIMEOUT: 5,
-            CONF_POLLING_INTERVAL: 6,
-        },
+        {CONF_HOST: HOST, CONF_API_KEY: "a-fresh-token"},
     )
     await hass.async_block_till_done()
-    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["type"] is FlowResultType.ABORT
+    assert result["reason"] == "reconfigure_successful"
     assert loaded_entry.data[CONF_API_KEY] == "a-fresh-token"

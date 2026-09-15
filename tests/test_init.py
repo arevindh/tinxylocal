@@ -143,3 +143,28 @@ async def test_repair_leaves_correct_ids_alone(
     }
     assert "sensor.hall_ip_address" in ids
     assert not any(".hall_hall_" in i for i in ids)
+
+
+async def test_device_removal_refuses_the_live_device(
+    hass: HomeAssistant, loaded_entry: MockConfigEntry
+) -> None:
+    """The device being polled cannot be deleted; a stale one can."""
+    from homeassistant.helpers import device_registry as dr
+
+    from custom_components.tinxylocal import async_remove_config_entry_device
+
+    from .const import DEVICE_ID
+
+    registry = dr.async_get(hass)
+    live = registry.async_get_device_by_identifier(
+        (DOMAIN, DEVICE_ID), loaded_entry.entry_id
+    )
+    assert live is not None
+    assert not await async_remove_config_entry_device(hass, loaded_entry, live)
+
+    stale = registry.async_get_or_create(
+        config_entry_id=loaded_entry.entry_id,
+        identifiers={(DOMAIN, "some-old-pairing")},
+        name="Old Hall",
+    )
+    assert await async_remove_config_entry_device(hass, loaded_entry, stale)

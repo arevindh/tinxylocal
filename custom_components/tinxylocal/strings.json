@@ -23,34 +23,46 @@
         "data": {
           "api_key": "[%key:common::config_flow::data::api_key%]"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Tinxy device",
+        "description": "Update the address this device is reached at, or replace the API key. The IP is checked against the device's chip id before it is saved.",
+        "data": {
+          "host": "[%key:common::config_flow::data::host%]",
+          "api_key": "[%key:common::config_flow::data::api_key%]"
+        },
+        "data_description": {
+          "host": "Local IP address of the Tinxy device",
+          "api_key": "Leave unchanged if not updating"
+        }
       }
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
       "unknown": "[%key:common::config_flow::error::unknown%]",
-      "device_not_in_account": "That device is not in the Tinxy account this API key belongs to."
+      "device_not_in_account": "That device is not in the Tinxy account this API key belongs to.",
+      "wrong_chip_id": "Another Tinxy device answered at that address. Check the IP.",
+      "api_not_available": "The device answered but its local API is not enabled."
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
       "api_not_available": "The device answered but its local API is not enabled.",
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]"
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "reconfigure_successful": "[%key:common::config_flow::abort::reconfigure_successful%]"
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Tinxy Local Options",
-        "description": "Configure advanced settings for Tinxy Local integration.",
+        "description": "Configure advanced settings for Tinxy Local integration. The device address and API key are changed under Reconfigure.",
         "data": {
-          "host": "Device IP Address",
-          "api_key": "API Key",
           "request_timeout": "Request Timeout",
           "polling_interval": "Polling Interval",
           "rate_limit_delay": "Command spacing"
         },
         "data_description": {
-          "host": "Local IP address of the Tinxy device",
           "request_timeout": "Timeout in seconds for HTTP requests to Tinxy devices. Default is 3 seconds. Increase if you have slow network connections.",
           "polling_interval": "How often to poll devices for status updates. Default is 6 seconds. Must be greater than or equal to request timeout. Lower values provide faster updates but increase network traffic.",
           "rate_limit_delay": "Minimum gap between commands to one device. Default is 1 second, which is the fastest the device's authentication allows: its token encrypts a whole-second timestamp, so two commands in the same second cannot both be accepted. This applies per device, not per switch. Raise it if a device stops responding."
@@ -58,9 +70,6 @@
       }
     },
     "error": {
-      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "unknown": "[%key:common::config_flow::error::unknown%]",
       "polling_less_than_timeout": "Polling interval must be greater than or equal to request timeout"
     }
   }
