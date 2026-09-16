@@ -6,3 +6,4 @@ __pycache__/
 CLAUDE.md
 .pytest_cache/
 .coverage
+TODO.md

@@ -161,12 +161,22 @@ device page if you are chasing down a signal problem.
 
 ## Settings
 
-Open the device, then **⋮ → Reconfigure** (or the **Configure** button) to change:
+Open the device, then **⋮ → Reconfigure** to change where the device is and who you are:
+
+| Setting | What it does |
+|---|---|
+| Device IP address | Where to reach the device |
+| API key | Used only to re-validate your account |
+
+The new IP is checked against the device's chip ID before it is saved, so a typo cannot
+silently point the entry at different hardware. If re-pointing an entry leaves an old device
+row behind with no entities under it, delete that row from the device page; the device the
+entry is actually polling cannot be deleted, since it would come back on the next refresh.
+
+The **Configure** button holds the timings:
 
 | Setting | Default | What it does |
 |---|---|---|
-| Device IP address | | Where to reach the device |
-| API key | | Used only to re-validate your account |
 | Request timeout | `5s` | How long to wait for a device to answer |
 | Polling interval | `6s` | How often status is refreshed. Must be at least the timeout |
 | Command spacing | `1s` | Minimum gap between commands to one device. See below |
