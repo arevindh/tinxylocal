@@ -80,6 +80,15 @@ def _backfill_device_names(device: dict[str, Any]) -> None:
             device["devices"] = device["deviceTypes"]
 
 
+def _chip_id(device: dict[str, Any]) -> str | None:
+    """Read a cloud device's chip id.
+
+    Devices behind the hub (EVA_BULB and friends) are not on wifi and have no
+    chip id, so the cloud sends `uuidRef: null` rather than omitting the key.
+    """
+    return (device.get("uuidRef") or {}).get("uuid")
+
+
 def _entry_data(device: dict[str, Any], host: str, api_token: str) -> dict[str, Any]:
     """Build the config entry payload for a selected cloud device."""
     _backfill_device_names(device)
@@ -170,8 +179,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     (
                         item
                         for item in devices
-                        if item.get("uuidRef", {}).get("uuid")
-                        == self.discovered_chip_id
+                        if _chip_id(item) == self.discovered_chip_id
                         and "mqttPassword" in item
                     ),
                     None,
@@ -328,11 +336,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         # Build the selection schema
         device_options = {
-            item["_id"]: "{} ({})".format(item["name"], item["uuidRef"]["uuid"])
+            item["_id"]: "{} ({})".format(item["name"], _chip_id(item))
             for item in self.cloud_devices
-            if "mqttPassword" in item
-            and "uuidRef" in item
-            and "uuid" in item["uuidRef"]
+            if "mqttPassword" in item and _chip_id(item)
         }
 
         if user_input:
