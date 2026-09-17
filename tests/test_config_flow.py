@@ -25,6 +25,8 @@ from .const import (
     API_KEY,
     CHIP_ID,
     CLOUD_DEVICES,
+    CLOUD_DEVICES_WITH_HUB_BULB,
+    CLOUD_HUB_BULB,
     CLOUD_URL,
     DEVICE_ID,
     DEVICE_INFO,
@@ -234,6 +236,40 @@ async def test_zeroconf_discovery_creates_entry(
     assert result["type"] is FlowResultType.CREATE_ENTRY
     assert result["title"] == "Hall"
     assert result["result"].unique_id == CHIP_ID
+
+
+async def test_zeroconf_skips_hub_bulbs(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """A bulb behind the hub has `uuidRef: null` and must not break the lookup."""
+    aioclient_mock.get(INFO_URL, json=DEVICE_INFO)
+    aioclient_mock.get(CLOUD_URL, json=CLOUD_DEVICES_WITH_HUB_BULB)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_ZEROCONF}, data=DISCOVERY
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_API_KEY: API_KEY}
+    )
+    assert result["type"] is FlowResultType.CREATE_ENTRY
+    assert result["result"].unique_id == CHIP_ID
+
+
+async def test_user_flow_skips_hub_bulbs(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """The device picker leaves out chip-id-less devices instead of raising."""
+    aioclient_mock.get(INFO_URL, json=DEVICE_INFO)
+    aioclient_mock.get(CLOUD_URL, json=CLOUD_DEVICES_WITH_HUB_BULB)
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_API_KEY: API_KEY}
+    )
+    assert result["step_id"] == "select_device"
+    offered = result["data_schema"].schema[CONF_DEVICE_ID].container
+    assert CLOUD_HUB_BULB["_id"] not in offered
+    assert DEVICE_ID in offered
 
 
 async def test_zeroconf_unreachable_aborts(

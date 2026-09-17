@@ -81,7 +81,31 @@ CLOUD_LOCK = {
     "firmwareVersion": 82,
 }
 
+# A bulb paired to the Tinxy hub. It is not on wifi, so it has no chip id and
+# the cloud sends `uuidRef: null`. Captured from a real account (issue #28).
+CLOUD_HUB_BULB = {
+    "_id": "626f9c1971a3f0fadd567cee",
+    "name": "Balcony Light",
+    "devices": [],
+    "deviceTypes": ["LED Bulb"],
+    "mqttPassword": MQTT_PASS,
+    "uuidRef": None,
+    "typeId": {
+        "name": "EVA_BULB",
+        "long_name": "Tinxy Smart Bulb",
+        "gtype": "action.devices.types.LIGHT",
+        "traits": ["action.devices.traits.OnOff"],
+        "features": ["SWITCH"],
+        "numberOfRelays": 1,
+    },
+    "firmwareVersion": 82,
+}
+
 CLOUD_DEVICES = [CLOUD_DEVICE, CLOUD_LOCK]
+
+# The same account with a hub bulb listed ahead of the wifi devices, which is
+# what the account in issue #28 looked like.
+CLOUD_DEVICES_WITH_HUB_BULB = [CLOUD_HUB_BULB, *CLOUD_DEVICES]
 
 ENTRY_DATA = {
     CONF_DEVICE: CLOUD_DEVICE,
