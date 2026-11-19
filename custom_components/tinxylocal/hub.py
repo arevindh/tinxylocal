@@ -89,9 +89,18 @@ class TinxyLocalHub:
         await api.sync_devices()
         return True
 
-    async def get_info(self, web_session) -> dict | None:
-        """Return the raw /info payload, or None if the device did not answer with one."""
-        response = await self._send_request("GET", "/info", web_session=web_session)
+    async def get_info(
+        self, web_session, *, quiet_not_found: bool = False
+    ) -> dict | None:
+        """Return the raw /info payload, or None if the device did not answer with one.
+
+        `quiet_not_found` logs a 404 at debug instead of error, for probes of
+        hosts that may not be Tinxy devices. Any other failure still logs as
+        an error.
+        """
+        response = await self._send_request(
+            "GET", "/info", web_session=web_session, quiet_not_found=quiet_not_found
+        )
         return response if isinstance(response, dict) else None
 
     async def validate_ip(self, web_session, chip_id=None) -> str:
@@ -128,13 +137,21 @@ class TinxyLocalHub:
         return None
 
     async def _send_request(
-        self, method: str, endpoint: str, payload=None, web_session=None
+        self,
+        method: str,
+        endpoint: str,
+        payload=None,
+        web_session=None,
+        *,
+        quiet_not_found: bool = False,
     ):
         """Handle HTTP requests and error checking."""
         url = f"{self.host}{endpoint}"
 
-        def handle_exception(message: str, exception: Exception | None):
-            _LOGGER.error(message)
+        def handle_exception(
+            message: str, exception: Exception | None, level: int = logging.ERROR
+        ):
+            _LOGGER.log(level, message)
             raise TinxyConnectionException(message) from exception
 
         try:
@@ -153,10 +170,19 @@ class TinxyLocalHub:
                         "the device key is correct in the integration options.",
                         None,
                     )
-                else:
+                if response.status == 404 and quiet_not_found:
                     handle_exception(
-                        f"Unexpected error: status {response.status}", None
+                        f"No Tinxy API at {url} (HTTP 404)", None, logging.DEBUG
                     )
+                handle_exception(
+                    f"Unexpected error for request to {url}: "
+                    f"status {response.status}",
+                    None,
+                )
+        except TinxyConnectionException:
+            # Already logged and raised by handle_exception above. Without this
+            # the catch-all below logs the same failure a second time.
+            raise
         except TimeoutError as e:
             handle_exception(f"Request to {url} timed out", e)
         except aiohttp.ClientError as e:

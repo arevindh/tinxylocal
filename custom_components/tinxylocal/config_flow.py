@@ -136,9 +136,12 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         host = str(discovery_info.ip_address)
 
         # The mDNS name only carries a truncated id, so ask the device itself.
+        # The `tinxy*` matcher also catches hosts that only carry the name, such
+        # as a Tinxy board reflashed with ESPHome, which answers /info with a 404.
+        # That is expected here, so it logs at debug and the flow aborts.
         try:
             info = await TinxyLocalHub(self.hass, host).get_info(
-                async_get_clientsession(self.hass)
+                async_get_clientsession(self.hass), quiet_not_found=True
             )
         except TinxyConnectionException:
             return self.async_abort(reason="cannot_connect")
